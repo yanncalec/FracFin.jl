@@ -1,1 +1,2 @@
-# Lusenn
+# FracFin: Fractional Financial Mathematics Library
+
