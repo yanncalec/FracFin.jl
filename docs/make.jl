@@ -1,3 +1,12 @@
-using Documenter, Example
+push!(LOAD_PATH,"../src/")
 
-makedocs()
+using Documenter, FracFin
+
+# makedocs()
+makedocs(
+    # options
+    modules = [FracFin],
+
+    format = :html,
+    sitename = "FracFin.jl"
+)
