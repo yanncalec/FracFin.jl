@@ -47,7 +47,7 @@ size(s::Sampler) = size(s.grid,)
 function rand_fBm(sampler::Sampler, Tmax::Real=1.)
     T = typeof(sampler)
     N = length(sampler)
-    δ = Tmax * step(sampler.grid)
+    δ = Tmax / N
 
     if T <: CholeskySampler
         X = rand(sampler)
