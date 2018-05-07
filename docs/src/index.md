@@ -1,27 +1,19 @@
-# FracFin.jl Documentation
+# FracFin.jl - Fractional Financial Mathematics Using Julia
+
+This is the documentation of [FracFin.jl](https://github.com/yanncalec/FracFin.jl), a Julia library for financial mathematics involving fractional stochastic process.
+
+#### Current features
+* Simulation of fractional and multi-fractional Brownian motions (fBm, mBm), and some related processes.
+* Estimation of long-range dependence and stochastic volatility.
+
+## Contents
 
 ```@contents
+Pages = ["getting_started.md", "overview.md"]
+Depth = 3
 ```
-
-## Stochastic process
-```@autodocs
-Modules = [FracFin]
-Order = [:module, :constant, :type]
-Pages = ["StochasticProcess.jl"]
-```
-
-## Sampler of stochastic process
-```@autodocs
-Modules = [FracFin]
-Pages = ["Sampler.jl"]
-```
-
-## Functions
-```@autodocs
-Modules = [FracFin]
-Order = [:function, :macro]
-Pages = ["StochasticProcess.jl", "Sampler.jl"]
 
 ## Index
 ```@index
 ```
+

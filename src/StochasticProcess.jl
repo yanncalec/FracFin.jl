@@ -1,27 +1,28 @@
-
 """
-Abstract real Gaussian stochastic process.
+Real Gaussian stochastic process.
 """
 abstract type StochasticProcess{T<:TimeStyle}<:Sampleable{Univariate, Continuous} end
 
+"""
+Process with integer time index (time-series).
+"""
 const DiscreteTimeStochasticProcess = StochasticProcess{DiscreteTime}
+
+"""
+Process with real time index.
+"""
 const ContinuousTimeStochasticProcess = StochasticProcess{ContinuousTime}
 
 """
-Abstract stationary process.
+Stationary process.
 """
 abstract type StationaryProcess{T}<:StochasticProcess{T} end
 
 const DiscreteTimeStationaryProcess = StationaryProcess{DiscreteTime}
 const ContinuousTimeStationaryProcess = StationaryProcess{ContinuousTime}
 
-doc"""
-Abstract self-similar process.
-
-A process $(X(t))_t$ is self-similar with exponent $H\geq 0$ if $X(ct)$ and $c^H X(t)$ have the probability distribution for any $t$ and $c>0$, moreover we require $X(0)=0$ which implies that $X$ is continuous at $0$.
-
-## Fields
-* `ss_exponent`: self-similar exponent $H$
+"""
+Self-similar process.
 """
 abstract type SelfSimilarProcess<:ContinuousTimeStochasticProcess end
 
@@ -32,45 +33,56 @@ Return the self-similar exponent of the process.
 """
 ss_exponent(X::SelfSimilarProcess) = throw(NotImplementedError("ss_exponent(::$(typeof(X)))"))
 
-doc"""
-Stationary increments process of some self-similar process.
-
-The increments of a process $(B_H(t))_{t\geq 0}$ with step $\delta>0$ is the discrete time process $(X^\delta_H(n))_{n=0,1\ldots}$ defined by
-
-$X^\delta_H(n) = B_H((n+1)\delta) - B_H(n\delta)$
-
-We always suppose $\delta=1$. In fact the following relation holds between the autocovariance function of $X^\delta_H$ and $X^1_H$:
-
-$\gamma_{X^{\delta}_H}(n) = \delta^{2H} \gamma_{X^1_H}(n)$
-
-Hence the step $\delta$ can be singled out in computations involving only the auto-covariance function.
-
-## Fields
-* `parent_process`: an object of the parent self-similar process
-
-## Example
-A fractional Brownian motion (fBm) is self-similar process with stationary increments. Its increments process is called fractional Gaussian noise (fGn).
 """
-abstract type IncrementProcess{T<:SelfSimilarProcess}<:DiscreteTimeStationaryProcess end
-
-# doc"""
-#     step(X::IncrementProcess)
-
-# Return the step of increment $\delta$ of the process.
-# """
-# step(X::IncrementProcess) = throw(NotImplementedError("incr_step(::$(typeof(X)))"))
+General (non-stationary) process of increments.
+"""
+abstract type GeneralIncrementProcess{T<:TimeStyle, P<:StochasticProcess}<:StochasticProcess{T} end
 
 """
-    ss_exponent(X::IncrementProcess)
+Stationary process of increments.
+"""
+abstract type StationaryIncrementProcess{T<:TimeStyle, P<:StochasticProcess}<:StationaryProcess{T} end
+
+"""
+Process of increments including both non-stationary and stationary cases.
+
+# Members
+* parent_process
+* step
+"""
+const IncrementProcess{T<:TimeStyle, P<:StochasticProcess} = Union{GeneralIncrementProcess{T, P}, StationaryIncrementProcess{T, P}}
+
+"""
+Self-similar process with stationary increments (SSSI).
+"""
+abstract type SSSIProcess<:SelfSimilarProcess end
+
+"""
+Process of increments of a SSSI process.
+"""
+abstract type IncrementSSSIProcess{T<:TimeStyle, P<:SSSIProcess}<:StationaryIncrementProcess{T, P} end
+
+const DiscreteTimeIncrementSSSIProcess{P<:SSSIProcess} = IncrementSSSIProcess{DiscreteTime, P}
+const ContinuousTimeIncrementSSSIProcess{P<:SSSIProcess} = IncrementSSSIProcess{ContinuousTime, P}
+
+"""
+    step(X::IncrementProcess)
+
+Return the step of increment of the process.
+"""
+step(X::IncrementProcess) = throw(NotImplementedError("incr_step(::$(typeof(X)))"))
+
+"""
+    ss_exponent(X::IncrementSSSIProcess)
 
 Return the self-similar exponent of the parent process.
 """
-ss_exponent(X::IncrementProcess) = throw(NotImplementedError("ss_exponent(::$(typeof(X)))"))
+ss_exponent(X::IncrementSSSIProcess) = throw(NotImplementedError("ss_exponent(::$(typeof(X)))"))
 
-doc"""
+"""
     autocov(X::StochasticProcess{T}, i::T, j::T) where T
 
-Auto-covariance function $\gamma_X(i,j)$ of a stochastic process $X$.
+Auto-covariance function of a stochastic process.
 """
 autocov(X::StochasticProcess{T}, i::T, j::T) where T = throw(NotImplementedError("autocov(::$(typeof(X)), ::$(T), ::$(T))"))
 
@@ -111,10 +123,10 @@ Alias to `autocov(X::StochasticProcess, G::SamplingGrid)`.
 """
 covmat(X::StochasticProcess{T}, G::SamplingGrid{<:T}) where T = autocov(X, G)
 
-doc"""
+"""
     autocov(X::StationaryProcess, i::Real)
 
-Auto-covarince function $\gamma_X(i)$ of a stationary stochastic process $X$.
+Auto-covarince function of a stationary stochastic process.
 """
 autocov(X::StationaryProcess{T}, i::T) where T = throw(NotImplementedError("autocov(::$(typeof(X)), ::Real)"))
 autocov(X::StationaryProcess{T}, i::T, j::T) where T = autocov(X, i-j)
@@ -204,27 +216,26 @@ function partcorr(X::DiscreteTimeStationaryProcess, G::DiscreteTimeRegularGrid, 
     end
 end
 
-doc"""
-    autocov(X::IncrementProcess, i::Int64, j::Int64)
+"""
+    autocov(X::IncrementProcess{T, P}, t::T, s::T) where {T, P}
 
 Return the auto-covariance function of a process of increments. The computation is done via the auto-covariance of the parent process.
 """
-function autocov(X::IncrementProcess, i::DiscreteTime, j::DiscreteTime)
-    P = X.parent_process
+function autocov(X::IncrementProcess{T, P}, t::T, s::T) where {T, P}
+    proc = X.parent_process
+    δ = X.step
 
-    return autocov(P, (i+1), (j+1)) - autocov(P, (i+1), (j)) -
-    autocov(P, (i), (j+1)) + autocov(P, (i), (j))
+    return autocov(proc, (t+δ), (s+δ)) - autocov(proc, (t+δ), (s)) - autocov(proc, (t), (s+δ)) + autocov(proc, (t), (s))
 end
 
-# autocov(X::IncrementProcess, i::DiscreteTime) = autocov(X, i, 0)
 
-doc"""
+"""
 Fractional Brownian motion.
 
-## Fields
+# Members
 * hurst: the Hurst exponent
 """
-struct FractionalBrownianMotion<:SelfSimilarProcess
+struct FractionalBrownianMotion<:SSSIProcess
     hurst::Float64
 
     function FractionalBrownianMotion(hurst::Float64)
@@ -236,51 +247,55 @@ end
 ss_exponent(X::FractionalBrownianMotion) = X.hurst
 
 doc"""
-    autocov(X::FractionalBrownianMotion, i::Real, j::Real)
+    autocov(X::FractionalBrownianMotion, t::ContinuousTime, s::ContinuousTime)
 
 Return the autocovariance function of fBm:
-    $\gamma_{B_H}(i,j) = \frac 1 2 (|i|^{2H} + |j|^2H - |i-j|^{2H})
+    $\gamma(t,s) = \frac 1 2 (|t|^{2H} + |s|^{2H} - |t-s|^{2H})
 """
-function autocov(X::FractionalBrownianMotion, i::ContinuousTime, j::ContinuousTime)
+function autocov(X::FractionalBrownianMotion, t::ContinuousTime, s::ContinuousTime)
     twoh::Float64 = 2*X.hurst
-    return 0.5 * (abs(i)^twoh + abs(j)^twoh - abs(i-j)^twoh)
+    return 0.5 * (abs(t)^twoh + abs(s)^twoh - abs(t-s)^twoh)
 end
 
 doc"""
 Fractional Gaussian noise.
-"""
-struct FractionalGaussianNoise<:IncrementProcess{FractionalBrownianMotion}
-    hurst::Float64
-    parent_process::FractionalBrownianMotion
 
-    function FractionalGaussianNoise(hurst::Float64)
-        new(hurst, FractionalBrownianMotion(hurst))
+fGn is the increment process of a fBm $X$. It is a discrete-time process and is defined as
+
+$$ \Delta_\delta X(n) = X((n+1)\delta) - X(n\delta) $$
+"""
+struct FractionalGaussianNoise<:DiscreteTimeIncrementSSSIProcess{FractionalBrownianMotion}
+    parent_process::FractionalBrownianMotion
+    step::Float64
+
+    function FractionalGaussianNoise(hurst::Float64, step::Float64=1.)
+        step > 0 || error("Step must be > 0.")
+        new(FractionalBrownianMotion(hurst), step)
     end
 end
 
-FractionalGaussianNoise(P::FractionalBrownianMotion) = FractionalGaussianNoise(P.hurst)
+step(X::FractionalGaussianNoise) = X.step
 
-ss_exponent(X::FractionalGaussianNoise) = X.hurst
+ss_exponent(X::FractionalGaussianNoise) = X.parent_process.hurst
 
 doc"""
-    autocov(X::FractionalGaussianNoise, l::Int64)
+    autocov(X::FractionalGaussianNoise, l::DiscreteTime)
 
 Return the autocovariance function of fGn:
-    $\gamma_{X^1_H}(i,j) = \frac 1 2 (|i-j+1|^{2H} + |i-j-1|^2H - 2|i-j|^{2H})
+    $\gamma_{X^1_H}(i,j) = \frac 1 2 \delta^{2H} (|i-j+1|^{2H} + |i-j-1|^2H - 2|i-j|^{2H})
+where $i,j$ are integers and $\delta$ is the step of increment.
 """
 function autocov(X::FractionalGaussianNoise, l::DiscreteTime)
-    twoh::Float64 = 2*X.hurst
-    return 0.5 * (abs(l+1)^twoh + abs(l-1)^twoh - 2*abs(l)^twoh)
+    twoh::Float64 = 2*X.parent_process.hurst
+    return 0.5 * X.step^twoh * (abs(l+1)^twoh + abs(l-1)^twoh - 2*abs(l)^twoh)
 end
-
-# power_law_exponent(X::FractionalGaussianNoise) = 2*X.hurst
 
 doc"""
 Fractional integrated process.
 
 This is a stationary process defined by
 
-$\nabla^d X(t) = \varepsilon(t)$
+$$\nabla^d X(t) = \varepsilon(t)$$
 
 where $\nabla^d, d\in(-1/2, 1/2)$ is the fractional differential operator, and $\varepsilon(t)\sim \mathcal{N}(0,1)$ are i.i.d. Gaussian variables.
 """
@@ -294,6 +309,8 @@ struct FractionalIntegrated<:DiscreteTimeStationaryProcess
     end
 end
 
+ss_exponent(X::FractionalIntegrated) = X.d + 1/2
+
 partcorr(X::FractionalIntegrated, k::DiscreteTime) = X.d/(k-X.d)
 
 function autocov(X::FractionalIntegrated, n::DiscreteTime)
@@ -301,11 +318,9 @@ function autocov(X::FractionalIntegrated, n::DiscreteTime)
 end
 
 """
-    autocov!(C::Vector{Float64}, X::FractionalIntegrated, G::RegularGrid)
+    autocov!(C::Vector{Float64}, X::FractionalIntegrated, G::DiscreteTimeRegularGrid)
 
-# Notes
-* The covariance of a fractional integrated process is computed recursively, so we overload `autocov!` for reason of efficiency.
-* `G::RegularGrid` is not used in the computation.
+Note: The covariance of a fractional integrated process is computed recursively, so we overload `autocov!` for reason of efficiency.
 """
 function autocov!(C::Vector{Float64}, X::FractionalIntegrated, G::DiscreteTimeRegularGrid)
     # check dimension
@@ -347,7 +362,6 @@ FARIMA(d::Float64) = FARIMA(d, Float64[], Float64[])
 # parameters(X::FARIMA{P,Q}) where {P,Q} = (P, X.d, Q)
 
 # FARIMA(d::Float64, ar::Vector{Float64}, ma::Vector{Float64}) = FARIMA{length(ar), length(ma)}(d, ar, ma)
-
 
 
 doc"""
@@ -400,3 +414,13 @@ function LevinsonDurbin(cseq::Vector{Float64})
 end
 
 LevinsonDurbin(p::StationaryProcess{T}, g::RegularGrid{<:T}) where T = LevinsonDurbin(covseq(p, g))
+
+
+"""
+Cholesky decomposition based on SVD.
+"""
+function chol_svd(W::Matrix{Float64})
+    Um,Sm,Vm=svd((W+W')/2)  # svd of forced symmetric matrix
+    Ss = sqrt.(Sm[Sm.>0])  # truncation of negative singular values
+    return Um*diagm(Ss)
+end
