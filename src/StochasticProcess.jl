@@ -257,6 +257,76 @@ function autocov(X::FractionalBrownianMotion, t::ContinuousTime, s::ContinuousTi
     return 0.5 * (abs(t)^twoh + abs(s)^twoh - abs(t-s)^twoh)
 end
 
+# Moving average kernels of fBm
+doc"""
+K_+ kernel
+"""
+function Kplus(x::Real,t::Real,H::Real)
+    # @assert t>0
+    p::Float64 = H-1/2
+    v::Float64 = 0
+    if x<0
+        v = (t-x)^p - (-x)^p
+    elseif 0<=x<t
+        v = (t-x)^p
+    else
+        v = 0
+    end
+    return v
+end
+
+doc"""
+K_- kernel
+"""
+function Kminus(x::Real,t::Real,H::Real)
+    p::Float64 = H-1/2
+    v::Float64 = 0
+    if x<=0
+        v = 0
+    elseif 0<x<=t
+        v = -(x)^p
+    else
+        v = (x-t)^p - (x)^p
+    end
+    return v
+end
+
+doc"""
+K_+ + K_- kernel
+"""
+Kppm(x, t, H) = Kplus(x,t,H) + Kminus(x,t,H)
+
+doc"""
+K_+ - K_- kernel
+"""
+Kpmm(x, t, H) = Kplus(x,t,H) - Kminus(x,t,H)
+
+# function Kppm(x::Real,t::Real,H::Real)
+#     p::Float64 = H-1/2
+#     v::Float64 = 0
+#     if x==0
+#         v = abs(t)^p
+#     elseif x==t
+#         v = -abs(t)^p
+#     else
+#         v = abs(t-x)^p - abs(x)^p
+#     end
+#     return v
+# end
+
+# function Kpmm(x::Real,t::Real,H::Real)
+#     p::Float64 = H-1/2
+#     v::Float64 = 0
+#     if x==0
+#         v = sign(t)*abs(t)^p
+#     elseif x==t
+#         v = -sign(-t)*abs(t)^p
+#     else
+#         v = sign(t-x)*abs(t-x)^p - sign(-x)*abs(x)^p
+#     end
+#     return v
+# end
+
 doc"""
 Fractional Gaussian noise.
 
@@ -362,6 +432,7 @@ FARIMA(d::Float64) = FARIMA(d, Float64[], Float64[])
 # parameters(X::FARIMA{P,Q}) where {P,Q} = (P, X.d, Q)
 
 # FARIMA(d::Float64, ar::Vector{Float64}, ma::Vector{Float64}) = FARIMA{length(ar), length(ma)}(d, ar, ma)
+
 
 
 doc"""
