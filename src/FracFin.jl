@@ -10,8 +10,12 @@ import Base: convert, rand!, rand, length, size, show, binomial, getindex, promo
 import Distributions: VariateForm, Univariate, Multivariate, ValueSupport, Discrete, Continuous, Sampleable
 import StatsBase: autocov!, autocov
 
+import Wavelets
 import Wavelets.WT.daubechies
 import Wavelets.Util.mirror
+
+import DataFrames
+import GLM
 
 """
     Exception for not implemented methods.
@@ -65,8 +69,11 @@ export
     rand_otf!
     # rand_rfn
 
+
 include("SamplingGrid.jl")
 include("StochasticProcess.jl")
 include("Sampler.jl")
+include("Estimator.jl")
+include("Tool.jl")
 
 end # module

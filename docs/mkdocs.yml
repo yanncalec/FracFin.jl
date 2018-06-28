@@ -1,0 +1,42 @@
+site_name: FracFin.jl
+site_author: Yann Calec
+copyright: Yann Calec 2017-2018
+repo_url: https://github.com/yanncalec/FracFin.jl
+
+theme: readthedocs
+
+#extra:
+#  palette:
+#    primary: 'indigo'
+#    accent:  'blue'
+
+extra_css:
+  - assets/Documenter.css
+
+#extra_javascript:
+#  - https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML
+#  - assets/mathjaxhelper.js
+
+markdown_extensions:
+  - extra
+  - tables
+  - fenced_code
+  - codehilite(css_class=code)
+#  - mdx_math
+
+# google_analytics:
+#   - 'UA-6474352-10'
+#   - 'auto'
+
+# extra:
+#   social:
+#   - type: 'twitter'
+#     link: 'https://twitter.com/mpastell'
+
+docs_dir: 'build'
+
+pages:
+  - Home: "index.md"
+  - Getting started: "getting_started.md"
+  - Overview: "overview.md"
+  - Basic usage: "usage.md"

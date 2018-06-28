@@ -604,6 +604,9 @@ binomial(n::Complex, k::Complex) = exp(lgamma(n+1)-lgamma(n-k+1)-lgamma(k+1))
 binomial(n::Real, k::Real) = real(binomial(Complex(n), Complex(k)))
 # binomial(n::Number, k::Number) = binomial(Complex(n), Complex(k))
 
+"""
+Dyadic refinement sampling.
+"""
 function rand_rfn(x0::Vector{Float64}, s::WaveletSampler)
     x = zeros(2*length(x0))  # up-sampled samples
     w = zeros(2*length(x0))  # white noise
