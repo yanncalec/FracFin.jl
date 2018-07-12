@@ -44,8 +44,35 @@ applied in a similar way as above.
 The intercepts in both OLS are supposed to be zero. To extract the estimation of H and σ, use
 the function `powlaw_coeff`.
 """
-function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, pows::AbstractArray{T}) where {T<:Real}
-    # p-th moment of the increment of a vector
+
+function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, pows::AbstractArray{T}; splstep::Real=1.) where {T<:Real}
+    # Define the function for computing the p-th moment of the increment
+    moment_incr(X,d,p) = mean((abs.(X[d+1:end] - X[1:end-d])).^p)
+
+    # Estimation of Hurst exponent and β
+    H = zeros(Float64, length(pows))
+    β = zeros(Float64, length(pows))
+    C = zeros(Float64, length(pows))
+    for (n,p) in enumerate(pows)
+        C[n] = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
+
+        yp = map(d -> log(moment_incr(X, d, p)), lags)
+        xp = p * log.(lags)
+        Ap = hcat(xp, ones(xp))  # design matrix
+        H[n], β[n] = Ap \ yp  # estimation of H and β
+
+        # dg = DataFrames.DataFrame(xvar=Ap, yvar=yp)
+        # ols = GLM.lm(@GLM.formula(yvar ~ xvar), dg)
+        # β[n], H[n] = GLM.coef(ols)
+    end
+
+    Σ = (splstep.^(-H)) .* exp.((β-log.(C))./pows)
+    return mean(H), mean(Σ)
+end
+
+
+function powlaw_estim_old(X::Vector{Float64}, lags::AbstractArray{Int}, pows::AbstractArray{T}) where {T<:Real}
+    # Define the function for computing the p-th moment of the increment
     moment_incr(X,d,p) = mean((abs.(X[d+1:end] - X[1:end-d])).^p)
 
     # Estimation of Hurst exponent
@@ -66,8 +93,6 @@ function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, pows::Abstra
     Z = Y -  Hurst * (log.(lags) * pows') - ones(lags) * log.(cps)'
     dg = DataFrames.DataFrame(xvar=(ones(lags) * pows')[:],
                               yvar=Z[:])
-    println(dg.xvar)
-    println(dg.yvar)
     ols_sigma = GLM.lm(@GLM.formula(yvar ~ xvar), dg)
 
     return Y, Dict('H'=>ols_hurst, 'σ'=>ols_sigma)
