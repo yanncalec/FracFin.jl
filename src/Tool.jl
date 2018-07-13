@@ -25,6 +25,7 @@ function convolution_matrix(h::Vector{T}, N::Int) where T
     return K[:,1:N]
 end
 
+
 """
 Compute the scaling and the wavelet function using the cascade algorithm.
 
@@ -211,44 +212,96 @@ vandermonde(nrow::Int, ncol::Int) = vandermonde((nrow, ncol))
 
 """
 Continuous wavelet transform based on quadrature.
+
+# Args
+* x: input signal
+* 
 """
-function cwt(x::Vector{Float64}, ψ::Vector{Float64}, v::Int, Sψ::Real, sclrng::AbstractArray{Int},
-    mode::Symbol=:center)
-
-    @assert Sψ > 0
-    @assert v > 0
-
+function cwt_quad(x::Vector{Float64}, wfunc::Function, sclrng::AbstractArray{Int}, mode::Symbol=:center)
     Ns = length(sclrng)
-    Nw = length(ψ)
     Nx = length(x)
-    dh = Sψ/length(ψ)  # sampling step
 
     dc = zeros((Nx, Ns))
     mc = zeros(Bool, (Nx, Ns))
 
-    # H = Vector{Vector{Float64}}(Ns)
-    # Sh = zeros(Ns)
-
     for (n,k) in enumerate(sclrng)
-        idx = [max(1, min(Nw, floor(Int, n/k/dh))) for n in 1:(k*Sψ)]
-        h = ψ[idx]
+        f = wfunc(k)        
+        km, vm = convmask(Nx, length(f), mode)
 
-        # forcing vanishing moments
-        # this gives more v.m. than h -= sum(h)/length(idx)
-        V = vandermonde((length(h), v))'  # Under-determined Vandermonde matrix
-        h -= V\(V*h)  # Projection onto the kernel of V
-
-        km, vm = FracFin.convmask(Nx, length(h), mode)
-
-        #     Sh[k] = sum(h)
-        #     H[k] = h
-
-        Y = conv(x, h)
+        Y = conv(x, f)
         dc[:,n] = Y[km] / sqrt(k)
         mc[:,n] = vm[km]
     end
     return dc, mc
 end
+
+
+function _intscale_wavelet_filter(k::Int, ψ::Vector{Float64}, Sψ::Tuple{Real,Real}, v::Int=0)
+    # @assert k > 0
+    # @assert Sψ[2] > Sψ[1]
+    
+    Nψ = length(ψ)
+    dh = (Sψ[2]-Sψ[1])/Nψ  # sampling step
+    # @assert k < 1/dh  # upper bound of scale range
+
+    Imin, Imax = ceil(Int, k*Sψ[1]), floor(Int, k*Sψ[2])
+    idx = [max(1, min(Nψ, floor(Int, n/k/dh))) for n in Imin:Imax]
+    f::Vector{Float64} = ψ[idx]
+
+    # Forcing vanishing moments: necessary to avoid inhomogenity due to sampling of ψ
+    # Projection onto the kernel of a under-determined Vandermonde matrix:
+    if v>0
+        V = vandermonde((length(f), v))'
+        f -= V\(V*f)  
+    end
+
+    return f
+end
+
+function _intscale_wavelet_filter(k::Int, ψ::Function, Sψ::Tuple{Real,Real}, v::Int=0)
+    # @assert k > 0
+    # @assert Sψ[2] > Sψ[1]
+    
+    Imin, Imax = ceil(Int, k*Sψ[1]), floor(Int, k*Sψ[2])
+    f::Vector{Float64} = ψ.((Imin:Imax)/k)
+
+    # Forcing vanishing moments
+    if v>0
+        V = vandermonde((length(f), v))'
+        f -= V\(V*f)  
+    end
+
+    return f
+end
+
+
+function _intscale_haar_filter(k::Int)
+    h = ones(Float64, 2*k)
+    h[k+1:end] = -1.
+    return h/sqrt(2)
+end
+
+"""
+Continous Haar transform.
+"""
+function cwt_haar(x::Vector{Float64}, sclrng::AbstractArray{Int}, mode::Symbol=:center)
+    return cwt_quad(x, _intscale_haar_filter, sclrng, mode)
+end
+
+
+mexhat(t::Real) = -exp(-t^2) * (4t^2-2t) / (2*sqrt(2π))
+
+function _intscale_mexhat_filter(k::Int)
+    return _intscale_wavelet_filter(k, mexhat, (-5.,5.), 2)
+end
+
+"""
+Continous Mexican hat transform
+"""
+function cwt_mexhat(x::Vector{Float64}, sclrng::AbstractArray{Int}, mode::Symbol=:center)
+    return cwt_quad(x, _intscale_mexhat_filter, sclrng, mode)
+end
+
 
 
 # function cwt(x::Vector{Float64}, ψ::Vector{Float64}, Sψ::Real, level::Int, mode::Symbol=:center)
