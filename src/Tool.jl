@@ -279,49 +279,49 @@ end
 # end
 
 
-"""
-Stationary wavelet transform using à trous algorithm.
+# """
+# Stationary wavelet transform using à trous algorithm.
 
-# Returns
-* Ma: matrix of approximation coefficients with increasing scale index in row direction
-* Md: matrix of detail coefficients
-* nbem: number of left side boundary elements
-"""
-function _swt_full(x::Vector{Float64}, level::Int, lo::Vector{Float64}, hi::Vector{Float64}=Float64[])
-    # @assert level > 0
-    # @assert length(lo) == length(hi)
+# # Returns
+# * Ma: matrix of approximation coefficients with increasing scale index in row direction
+# * Md: matrix of detail coefficients
+# * nbem: number of left side boundary elements
+# """
+# function _swt_full(x::Vector{Float64}, level::Int, lo::Vector{Float64}, hi::Vector{Float64}=Float64[])
+#     # @assert level > 0
+#     # @assert length(lo) == length(hi)
 
-    # if high pass filter is not given, use the qmf.
-    if isempty(hi)
-        hi = (lo .* (-1).^(1:length(lo)))[end:-1:1]
-    end
+#     # if high pass filter is not given, use the qmf.
+#     if isempty(hi)
+#         hi = (lo .* (-1).^(1:length(lo)))[end:-1:1]
+#     end
 
-    ac = Array{Vector{Float64},1}(level)
-    dc = Array{Vector{Float64},1}(level)
-    klen = zeros(Int, level)  # length of kernels
+#     ac = Array{Vector{Float64},1}(level)
+#     dc = Array{Vector{Float64},1}(level)
+#     klen = zeros(Int, level)  # length of kernels
 
-    # Finest level transform
-    ac[1] = conv(lo, x) * sqrt(2)
-    dc[1] = conv(hi, x) * sqrt(2)
-    klen[1] = length(lo)
+#     # Finest level transform
+#     ac[1] = conv(lo, x) * sqrt(2)
+#     dc[1] = conv(hi, x) * sqrt(2)
+#     klen[1] = length(lo)
 
-    # Iteration of the cascade algorithm
-    for n = 2:level
-        # up-sampling of qmf filters
-        s = 2^(n-1)
-        l = (length(lo)-1) * s + 1
-        lo_up = zeros(Float64, l)
-        lo_up[1:s:end] = lo
-        hi_up = zeros(Float64, l)
-        hi_up[1:s:end] = hi
-        klen[n] = l
-        dc[n] = conv(hi_up, ac[end]) * sqrt(2)
-        ac[n] = conv(lo_up, ac[end]) * sqrt(2)
-    end
+#     # Iteration of the cascade algorithm
+#     for n = 2:level
+#         # up-sampling of qmf filters
+#         s = 2^(n-1)
+#         l = (length(lo)-1) * s + 1
+#         lo_up = zeros(Float64, l)
+#         lo_up[1:s:end] = lo
+#         hi_up = zeros(Float64, l)
+#         hi_up[1:s:end] = hi
+#         klen[n] = l
+#         dc[n] = conv(hi_up, ac[end]) * sqrt(2)
+#         ac[n] = conv(lo_up, ac[end]) * sqrt(2)
+#     end
 
-    nbem = cumsum(klen-1)  # number of the left side boundary elements (same for the right side)
-    return ac, dc, nbem
-end
+#     nbem = cumsum(klen-1)  # number of the left side boundary elements (same for the right side)
+#     return ac, dc, nbem
+# end
 
 
 # function conv_keep(x::Vector{Float64}, h::Vector{Float64}, mode::Symbol)
@@ -378,25 +378,25 @@ end
 # end
 
 
-"""
-Continuous wavelet transform using parametric wavelet.
-"""
-function cwt(x::Vector{Float64}, lo::Vector{Float64}, level::Int)
-    @assert level>0
+# """
+# Continuous wavelet transform using parametric wavelet.
+# """
+# function cwt(x::Vector{Float64}, lo::Vector{Float64}, level::Int)
+#     @assert level>0
 
-#     xc = zeros(Float64, (level, length(x)))
-    ac::Array{Vector{Float64},1} = []
-    dc::Array{Vector{Float64},1} = []
-    klen = zeros(Int, level)
+# #     xc = zeros(Float64, (level, length(x)))
+#     ac::Array{Vector{Float64},1} = []
+#     dc::Array{Vector{Float64},1} = []
+#     klen = zeros(Int, level)
 
-    for n = 1:level
-        ϕ, ψ, g = wavefunc(lo, level=n, nflag=true)
-        push!(ac, conv(x, ϕ))
-        push!(dc, conv(x, ψ))
-        klen[n] = length(ϕ)
-    end
-    return ac, dc
-end
+#     for n = 1:level
+#         ϕ, ψ, g = wavefunc(lo, level=n, nflag=true)
+#         push!(ac, conv(x, ϕ))
+#         push!(dc, conv(x, ψ))
+#         klen[n] = length(ϕ)
+#     end
+#     return ac, dc
+# end
 
 # """
 # Morlet wavelet function.
@@ -404,18 +404,18 @@ end
 # function morlet()
 # end
 
-"""
-Mexican hat function.
+# """
+# Mexican hat function.
 
-# Reference
-* https://en.wikipedia.org/wiki/Mexican_hat_wavelet
-"""
-function mexhat(N::Int, a::Float64)
-    cst = 2 / (sqrt(3 * a) * (pi^0.25))
-    X = collect(0, N-1) - N/2
-    X = linspace(-3a, 3a, N)
-    return cst * (1 - (X/a).^2) .* exp(- (X/a).^2/2)
-end
+# # Reference
+# * https://en.wikipedia.org/wiki/Mexican_hat_wavelet
+# """
+# function mexhat(N::Int, a::Float64)
+#     cst = 2 / (sqrt(3 * a) * (pi^0.25))
+#     X = collect(0, N-1) - N/2
+#     X = linspace(-3a, 3a, N)
+#     return cst * (1 - (X/a).^2) .* exp(- (X/a).^2/2)
+# end
 
 
 ##### Special functions #####
