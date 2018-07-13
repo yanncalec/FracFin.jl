@@ -292,7 +292,7 @@ end
 mexhat(t::Real) = -exp(-t^2) * (4t^2-2t) / (2*sqrt(2π))
 
 function _intscale_mexhat_filter(k::Int)
-    return _intscale_wavelet_filter(k, mexhat, (-5.,5.), 2)
+    return _intscale_wavelet_filter(k, mexhat, (-5.,5.), 2)  # Mexhat has two vanishing moments
 end
 
 """
