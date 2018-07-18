@@ -1,3 +1,20 @@
+##### Algebra #####
+
+function col_normalize(A::Matrix, p::Real=2)
+    return A / diagm([norm(A[:,n], p) for n=1:size(A,2)])
+end
+
+function col_normalize!(A::Matrix, p::Real=2)
+    for n=1:size(A,2)
+        A[:,n] /= norm(A[:,n], p)
+    end
+    return A
+end
+
+row_normalize(A) = col_normalize(A.')
+row_normalize!(A) = col_normalize!(A.')
+
+
 ##### Wavelet transform #####
 
 # Normalizations of Wavelets.jl for different families are not coherent:
@@ -143,6 +160,75 @@ end
 
 
 """
+Down-sampling operator.
+"""
+function downsampling(x::AbstractArray{<:Any, 1}, s::Int=2)
+    return x[1:s:end]
+end
+
+"""
+Up-sampling operator.
+"""
+function upsampling(x::AbstractArray{<:Any, 1}, s::Int=2; tight::Bool=true)
+    y = zeros(length(x)*s)
+    y[1:s:end] = x
+    return tight ? y[1:(end-(s-1))] : y
+end
+
+↑ = upsampling  # \uparrow
+↓ = downsampling  # \downarrow
+
+∗(x,y) = conv(x,y)  # convolution, \ast
+⊛(x,y) = ↓(x ∗ ↑(y, 2, tight=true), 2)  # up-down convolution, \circledast
+
+
+"""
+Compute filters of Wavelet Packet transform.
+
+# Args
+* lo: low-pass filter
+* hi: high-pass filter
+* n: level of decomposition. If n=0 the original filters are returned.
+
+# Return
+* a matrix of size ?-by-2^n that each column is a filter.
+"""
+function wpt_filter(lo::Vector{T}, hi::Vector{T}, n::Int) where T<:Number
+    F0::Vector{Vector{T}}=[[1]]
+    for l=1:n+1
+        F1::Vector{Vector{T}}=[]
+        for f in F0
+            push!(F1, f ⊛ lo)
+            push!(F1, f ⊛ hi)
+        end
+        F0 = F1
+    end
+    return hcat(F0...)
+end
+
+
+"""
+N-fold convolution of two filters.
+
+Compute
+    x_0 ∗ x_1 ∗ ... x_{n-1}
+where x_i ∈ {lo, hi}, i.e. either the low or the high filter.
+
+# Return
+* a matrix of size ?-by-(level+1) that each column is a filter.
+"""
+function biconv_filter(lo::Vector{T}, hi::Vector{T}, n::Int) where T<:Number
+    @assert n>=0
+    F0::Vector{Vector{T}}=[]
+    for l=0:n+1
+        s = reduce(∗, reduce(∗, [1], [hi for i=1:l]), [lo for i=l+1:n+1])
+        push!(F0, s)
+    end
+    return hcat(F0...)
+end
+
+
+"""
 Dyadic scale stationary wavelet transform using à trous algorithm.
 
 # Returns
@@ -215,7 +301,7 @@ Continuous wavelet transform based on quadrature.
 
 # Args
 * x: input signal
-* 
+* wfunc: function for evaluation of wavelet at integer scales
 """
 function cwt_quad(x::Vector{Float64}, wfunc::Function, sclrng::AbstractArray{Int}, mode::Symbol=:center)
     Ns = length(sclrng)
@@ -225,7 +311,7 @@ function cwt_quad(x::Vector{Float64}, wfunc::Function, sclrng::AbstractArray{Int
     mc = zeros(Bool, (Nx, Ns))
 
     for (n,k) in enumerate(sclrng)
-        f = wfunc(k)        
+        f = wfunc(k)
         km, vm = convmask(Nx, length(f), mode)
 
         Y = conv(x, f)
@@ -236,10 +322,25 @@ function cwt_quad(x::Vector{Float64}, wfunc::Function, sclrng::AbstractArray{Int
 end
 
 
+"""
+Evaluate the wavelet function at integer scales by looking-up table.
+
+# Args
+* k: scale
+* ψ: compact wavelet function evaluated on a grid
+* Sψ: support of ψ
+* v: desired number of vanishing moments of ψ
+
+# Return
+f: the vector (ψ(n/k))_n such that n/k lies in Sψ.
+
+# Note
+For accuracy, increase the density of grid for pre-evaluation of ψ.
+"""
 function _intscale_wavelet_filter(k::Int, ψ::Vector{Float64}, Sψ::Tuple{Real,Real}, v::Int=0)
     # @assert k > 0
     # @assert Sψ[2] > Sψ[1]
-    
+
     Nψ = length(ψ)
     dh = (Sψ[2]-Sψ[1])/Nψ  # sampling step
     # @assert k < 1/dh  # upper bound of scale range
@@ -252,23 +353,24 @@ function _intscale_wavelet_filter(k::Int, ψ::Vector{Float64}, Sψ::Tuple{Real,R
     # Projection onto the kernel of a under-determined Vandermonde matrix:
     if v>0
         V = vandermonde((length(f), v))'
-        f -= V\(V*f)  
+        f -= V\(V*f)
     end
 
     return f
 end
 
+
 function _intscale_wavelet_filter(k::Int, ψ::Function, Sψ::Tuple{Real,Real}, v::Int=0)
     # @assert k > 0
     # @assert Sψ[2] > Sψ[1]
-    
+
     Imin, Imax = ceil(Int, k*Sψ[1]), floor(Int, k*Sψ[2])
     f::Vector{Float64} = ψ.((Imin:Imax)/k)
 
     # Forcing vanishing moments
     if v>0
         V = vandermonde((length(f), v))'
-        f -= V\(V*f)  
+        f -= V\(V*f)
     end
 
     return f
@@ -281,11 +383,48 @@ function _intscale_haar_filter(k::Int)
     return h/sqrt(2)
 end
 
+
+"""
+# Args
+* v: number of vanishing moments
+"""
+function bspline_filters(k::Int, v::Int)
+    @assert v>0
+    lo = vcat(ones(k), ones(k))
+    hi = vcat(ones(k),-ones(k))
+
+    # return col_normalize(wpt_filter(lo, hi, v-1)) * sqrt(k)
+    return col_normalize(biconv_filter(lo, hi, v-1)) * sqrt(k)
+end
+
+
+function _intscale_bspline_filter(k::Int, v::Int)
+    @assert v>0
+    hi = vcat(ones(k),-ones(k))
+    # Analogy of the continuous case:
+    # the l^2 norm of the rescaled filter ψ[⋅/k] is √k
+    b0 = reduce(∗, [1], [hi for n=1:v])
+    return normalize(b0) * sqrt(k)
+end
+
+
 """
 Continous Haar transform.
 """
 function cwt_haar(x::Vector{Float64}, sclrng::AbstractArray{Int}, mode::Symbol=:center)
     return cwt_quad(x, _intscale_haar_filter, sclrng, mode)
+end
+
+
+"""
+Continous B-Spline transform.
+
+# TODO: parallelization
+"""
+function cwt_bspline(x::Vector{Float64}, sclrng::AbstractArray{Int}, v::Int, mode::Symbol=:center)
+    # bsfilter = k->normalize(_intscale_bspline_filter(k, v))
+    bsfilter = k->_intscale_bspline_filter(k, v)
+    return cwt_quad(x, bsfilter, sclrng, mode)
 end
 
 
@@ -301,7 +440,6 @@ Continous Mexican hat transform
 function cwt_mexhat(x::Vector{Float64}, sclrng::AbstractArray{Int}, mode::Symbol=:center)
     return cwt_quad(x, _intscale_mexhat_filter, sclrng, mode)
 end
-
 
 
 # function cwt(x::Vector{Float64}, ψ::Vector{Float64}, Sψ::Real, level::Int, mode::Symbol=:center)
