@@ -178,6 +178,7 @@ end
 ↑ = upsampling  # \uparrow
 ↓ = downsampling  # \downarrow
 
+# ∗(x,y) = conv(x,y[end:-1:1])  # correlation, \ast
 ∗(x,y) = conv(x,y)  # convolution, \ast
 ⊛(x,y) = ↓(x ∗ ↑(y, 2, tight=true), 2)  # up-down convolution, \circledast
 
@@ -314,7 +315,7 @@ function cwt_quad(x::Vector{Float64}, wfunc::Function, sclrng::AbstractArray{Int
         f = wfunc(k)
         km, vm = convmask(Nx, length(f), mode)
 
-        Y = conv(x, f)
+        Y = conv(x, f[end:-1:1])
         dc[:,n] = Y[km] / sqrt(k)
         mc[:,n] = vm[km]
     end
