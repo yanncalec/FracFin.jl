@@ -711,3 +711,62 @@ Lower incomplete gamma function $\gamma(s,z)$ with complex arguments.
 function ligamma(s::Number, z::Number; N=100, epsilon=1e-20)
     return gamma(s) - uigamma(s, z; N=N, epsilon=epsilon)
 end
+
+
+"""
+Evaluate the Fourier transform of B-Spline wavelet.
+
+# Args
+* ω: frequency
+* v: vanishing moments
+"""
+function bspline_ft(ω::Real, v::Int)
+#     @assert v>0  # check vanishing moment
+    return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(√2*1im*ω))^(v)
+end
+
+
+"""
+Evaluate the integrand function of C^ψ_{H,ρ}
+
+# Args
+* ω: frequency
+* v: vanishing moments
+"""
+function Cbspline_intfunc(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
+#     @assert ρ>0
+#     @assert 1>H>0
+    return (ω==0) ? 0 : real(bspline_ft(sqrt(ρ)*ω, v) * conj(bspline_ft(ω/sqrt(ρ), v)) / abs(ω)^(2H+1) * exp(-1im*ω*τ))
+end
+
+"""
+Evaluate the C^ψ_{H,ρ} function by numerical integration.
+
+# Args
+"""
+function Cbspline_func(τ::Real, ρ::Real, H::Real, v::Int)
+    f(ω) = Cbspline_intfunc(τ, ω, ρ, H, v)
+    res = QuadGK.quadgk(f, -100, 100, order=10)
+    return res[1]
+end
+
+
+"""
+Evaluate matrix in DCWT
+"""
+function Cbspline_matrix(H::Real, v::Int, lag::Int, sclrng::AbstractArray)
+    return [Cbspline_func(lag/sqrt(i*j), j/i, H, v) for i in sclrng, j in sclrng]
+end
+#     A = zeros((length(sclrng),length(sclrng)))
+
+#     # Parallelization!
+#     for (c,i) in enumerate(sclrng)
+#         for (r,j) in enumerate(sclrng)
+#             A[r,c] = Cbspline_func(lag/sqrt(i*j), sqrt(i*j), H, v)
+#             # f(ω) = Cbspline_intfunc(lag/sqrt(i*j), ω, sqrt(i*j), H, v)
+#             # res = QuadGK.quadgk(f, -20, 20)
+#             # A[r,c] = res[1]
+#         end
+#     end
+#     return A
+# end

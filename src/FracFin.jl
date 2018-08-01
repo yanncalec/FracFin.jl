@@ -16,6 +16,7 @@ import Wavelets.Util.mirror
 
 import DataFrames
 import GLM
+import QuadGK
 
 """
     Exception for not implemented methods.
