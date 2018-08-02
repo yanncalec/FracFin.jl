@@ -734,27 +734,43 @@ Evaluate the integrand function of C^ψ_{H,ρ}
 * v: vanishing moments
 """
 function Cbspline_intfunc(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
-#     @assert ρ>0
-#     @assert 1>H>0
-    return (ω==0) ? 0 : real(bspline_ft(sqrt(ρ)*ω, v) * conj(bspline_ft(ω/sqrt(ρ), v)) / abs(ω)^(2H+1) * exp(-1im*ω*τ))
+    #     @assert ρ>0
+    #     @assert 1>H>0
+    s = √ρ
+    return (ω==0) ? 0 : real(bspline_ft(ω*s, v) * conj(bspline_ft(ω/s, v)) / abs(ω)^(2H+1) * exp(-1im*ω*τ))
 end
 
+function Cbspline_intfunc_expand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
+    #     @assert ρ>0
+    #     @assert 1>H>0
+    s = √ρ
+    # Version 1: non centered ψ. This does not work and produces artefacts of radiancy straight lines
+    # return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*v*(s-1/s)/2 - ω*τ) / abs(ω)^(2v+2H+1)
+    # Version 2: centered ψ. This works when τ=0 (no time-lag), otherwise the radius of concentric circles are wrong.
+    return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*τ) / abs(ω)^(2v+2H+1)
+end
+            
 """
 Evaluate the C^ψ_{H,ρ} function by numerical integration.
 
 # Args
 """
 function Cbspline_func(τ::Real, ρ::Real, H::Real, v::Int)
-    f(ω) = Cbspline_intfunc(τ, ω, ρ, H, v)
-    res = QuadGK.quadgk(f, -100, 100, order=10)
+    f = ω -> Cbspline_intfunc_expand(τ, ω, ρ, H, v)
+    # f = ω -> Cbspline_intfunc(τ, ω, ρ, H, v)
+
+    # res = QuadGK.quadgk(f, -100, 100, order=10)
+    res = QuadGK.quadgk(f, -50, 50)
     return res[1]
 end
 
 
 """
 Evaluate matrix in DCWT
+
+TODO: parallelization!
 """
-function Cbspline_matrix(H::Real, v::Int, lag::Int, sclrng::AbstractArray)
+function Cbspline_matrix(H::Real, v::Int, lag::Int, sclrng::AbstractArray)    
     return [Cbspline_func(lag/sqrt(i*j), j/i, H, v) for i in sclrng, j in sclrng]
 end
 #     A = zeros((length(sclrng),length(sclrng)))
@@ -770,3 +786,4 @@ end
 #     end
 #     return A
 # end
+
