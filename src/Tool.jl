@@ -378,14 +378,21 @@ function _intscale_wavelet_filter(k::Int, ψ::Function, Sψ::Tuple{Real,Real}, v
 end
 
 
+"""
+Integer scale Haar filter.
+
+# Notes
+- The true scale is `2k`.
+- The filter is not normalized. Normalization comes from the 1/sqrt(k) factor in cwt_quad.
+"""
 function _intscale_haar_filter(k::Int)
-    h = ones(Float64, 2*k)
-    h[k+1:end] = -1.
-    return h/sqrt(2)
+    return vcat(ones(Float64, k), -ones(Float64, k)) / √2  # L2 norm = √k
 end
 
 
 """
+Compute B-Spline filters.
+
 # Args
 * v: number of vanishing moments
 """
@@ -399,14 +406,35 @@ function bspline_filters(k::Int, v::Int)
 end
 
 
+"""
+B-Spline filter as the auto-convolution of Haar filter.
+
+# Notes
+- The true scale is `2k`, like in `_intscale_haar_filter`.
+- This filter is not normalized. A trick is used here to find the correct scaling.
+"""
 function _intscale_bspline_filter(k::Int, v::Int)
     @assert v>0
-    hi = vcat(ones(k),-ones(k))
+    hi = vcat(ones(Float64, k), -ones(Float64, k))
     # Analogy of the continuous case:
     # the l^2 norm of the rescaled filter ψ[⋅/k] is √k
     b0 = reduce(∗, [1], [hi for n=1:v])
-    return normalize(b0) * sqrt(k)
+
+    # # force even-length kernel
+    # if mod(length(b0),2) == 1
+    #     b0 = vcat(b0, 0)
+    # end
+
+    return normalize(b0) * sqrt(k)  # <- Trick!
 end
+
+# function _intscale_bspline_filter_tight(k::Int, v::Int)
+#     @assert v>0
+#     ko = max(1, ones(k÷2))
+#     hi = if k%2 == 1 vcat(ko, -ko) else vcat(ko, 0, -ko) end
+#     b0 = reduce(∗, [1], [hi for n=1:v])
+#     return normalize(b0) * sqrt(k)  # <- Trick!
+# end
 
 
 """
@@ -443,321 +471,51 @@ function cwt_mexhat(x::Vector{Float64}, sclrng::AbstractArray{Int}, mode::Symbol
 end
 
 
-# function cwt(x::Vector{Float64}, ψ::Vector{Float64}, Sψ::Real, level::Int, mode::Symbol=:center)
-#     Nw = length(ψ)
-#     Nx = length(X)
-#     dh = Sψ/length(ψ)  # sampling step
-
-#     dc = zeros((Nx, level))
-#     mc = zeros(Bool, (Nx, level))
-
-#     # H = Vector{Vector{Float64}}(Ns)
-#     # Sh = zeros(Ns)
-
-#     for k=1:level
-#         idx = [max(1, min(Nw, floor(Int, n/k/dh))) for n in 1:(k*Sψ)]
-#         h = ψ[idx]
-#         h -= sum(h)/length(idx)  # forcing vanishing moments
-#         km, vm = FracFin.convmask(Nx, length(h), mode)
-
-#         #     Sh[k] = sum(h)
-#         #     H[k] = h
-
-#         Y = conv(X, h)
-#         dc[:,k] = Y[km] / sqrt(k)
-#         mc[:,k] = vm[km]
-#     end
-#     return dc, mc
-# end
-
-
-# """
-# Stationary wavelet transform using à trous algorithm.
-
-# # Returns
-# * Ma: matrix of approximation coefficients with increasing scale index in row direction
-# * Md: matrix of detail coefficients
-# * nbem: number of left side boundary elements
-# """
-# function _swt_full(x::Vector{Float64}, level::Int, lo::Vector{Float64}, hi::Vector{Float64}=Float64[])
-#     # @assert level > 0
-#     # @assert length(lo) == length(hi)
-
-#     # if high pass filter is not given, use the qmf.
-#     if isempty(hi)
-#         hi = (lo .* (-1).^(1:length(lo)))[end:-1:1]
-#     end
-
-#     ac = Array{Vector{Float64},1}(level)
-#     dc = Array{Vector{Float64},1}(level)
-#     klen = zeros(Int, level)  # length of kernels
-
-#     # Finest level transform
-#     ac[1] = conv(lo, x) * sqrt(2)
-#     dc[1] = conv(hi, x) * sqrt(2)
-#     klen[1] = length(lo)
-
-#     # Iteration of the cascade algorithm
-#     for n = 2:level
-#         # up-sampling of qmf filters
-#         s = 2^(n-1)
-#         l = (length(lo)-1) * s + 1
-#         lo_up = zeros(Float64, l)
-#         lo_up[1:s:end] = lo
-#         hi_up = zeros(Float64, l)
-#         hi_up[1:s:end] = hi
-#         klen[n] = l
-#         dc[n] = conv(hi_up, ac[end]) * sqrt(2)
-#         ac[n] = conv(lo_up, ac[end]) * sqrt(2)
-#     end
-
-#     nbem = cumsum(klen-1)  # number of the left side boundary elements (same for the right side)
-#     return ac, dc, nbem
-# end
-
-
-# function conv_keep(x::Vector{Float64}, h::Vector{Float64}, mode::Symbol)
-#     nx = length(x)
-#     nh = length(h)
-#     xh = conv(x, h)
-
-#     mask = zeros(Bool, nx)
-#     y = zeros(Float64, nx)
-
-#     if mode == :L  # keep left
-#         y = xh[1:nx]
-#         mask[nh:end] = true
-#     elseif mode == :R  # keep right
-#         y = xh[end-nx+1:end]
-#         mask[1:end-nh+1] = true
-#     elseif mode == :C  # keep center
-#         m = div(nh, 2)
-#         y = xh[m:m+nx-1]
-#         mask[nh-m+1:end-m+1] = true
-#     end
-#     return y, mask
-# end
-
-
-# function _keep_(y::AbstracArray{1}, nk::Int, mode::Symbol)
-#     nx = length(y) - nk + 1  # size of original signal
-#     mask = zeros(Bool, nx)
-
-#     if mode == :L  # keep left
-#         x = y[1:nx]
-#         mask[nb] = true
-#     elseif mode == :R  # keep right
-#         y = x[end-nc+1:end]
-#     elseif mode == :C  # keep center
-#         m = div(nc, 2)
-#         y = x[m:m+nc-1]
-#     end
-#     return y
-# end
-
-# function _keep_coeffs(ac::Array{Vector{Float64},1}, dc::Array{Vector{Float64},1}, klen::Vector{Int}, mode::Symbol)
-#     level = length(ac)
-#     ma = zeros(Float64, (level, length(x)))  # matrix of approximation coeffs
-#     md = zeros(Float64, (level, length(x)))  # matrix of detail coeffs
-
-#     for n = 1:level
-#         if mode == :L  #
-#         ma[n, :] = ac[n][nbem[n]+1:end-nbem[n]]
-#         md[n, :] = dc[n][nbem[n]+1:end-nbem[n]]
-#     end
-
-#     return Ma, Md, mask
-# end
-
-
-# """
-# Continuous wavelet transform using parametric wavelet.
-# """
-# function cwt(x::Vector{Float64}, lo::Vector{Float64}, level::Int)
-#     @assert level>0
-
-# #     xc = zeros(Float64, (level, length(x)))
-#     ac::Array{Vector{Float64},1} = []
-#     dc::Array{Vector{Float64},1} = []
-#     klen = zeros(Int, level)
-
-#     for n = 1:level
-#         ϕ, ψ, g = wavefunc(lo, level=n, nflag=true)
-#         push!(ac, conv(x, ϕ))
-#         push!(dc, conv(x, ψ))
-#         klen[n] = length(ϕ)
-#     end
-#     return ac, dc
-# end
-
-# """
-# Morlet wavelet function.
-# """
-# function morlet()
-# end
-
-# """
-# Mexican hat function.
-
-# # Reference
-# * https://en.wikipedia.org/wiki/Mexican_hat_wavelet
-# """
-# function mexhat(N::Int, a::Float64)
-#     cst = 2 / (sqrt(3 * a) * (pi^0.25))
-#     X = collect(0, N-1) - N/2
-#     X = linspace(-3a, 3a, N)
-#     return cst * (1 - (X/a).^2) .* exp(- (X/a).^2/2)
-# end
-
-
-##### Special functions #####
-
-"""
-Compute the continued fraction involved in the upper incomplete gamma function using the modified Lentz's method.
-"""
-function _uigamma_cf(s::Complex, z::Complex; N=100, epsilon=1e-20)
-#     a::Complex = 0
-#     b::Complex = 0
-#     d::Complex = 0
-    u::Complex = s
-    v::Complex = 0
-    p::Complex = 0
-
-    for n=1:N
-#         a, b = (n%2==1) ? ((-div(n-1,2)-s)*z, s+n) : (div(n,2)*z, s+n)
-        a, b = (n%2==1) ? ((-div(n-1,2)-s), (s+n)/z) : (div(n,2), (s+n)/z)
-        u = b + a / u
-        v = 1/(b + a * v)
-        d = log(u * v)
-        (abs(d) < epsilon) ? break : (p += d)
-#         println("$(a), $(b), $(u), $(v), $(d), $(p), $(exp(p))")
-    end
-    return s * exp(p)
-end
-
-doc"""
-    uigamma0(z::Complex; N=100, epsilon=1e-20)
-
-Upper incomplete gamma function with vanishing first argument:
-$$ \Gamma(0,z) = \lim_{a\rightarrow 0} \Gamma(a,z) $$
-
-Computed using the series expansion of the [exponential integral](https://en.wikipedia.org/wiki/Exponential_integral) $E_1(z)$.
-"""
-function uigamma0(z::Number; N=100, epsilon=1e-20)
-    #     A::Vector{Complex} = [(-z)^k / k / exp(lgamma(k+1)) for k=1:N]
-    #     s = sum(A[abs.(A)<epsilon])
-    s::Complex = 0
-    for k=1:N
-        d = (-z)^k / k / exp(lgamma(k+1))
-        (abs(d) < epsilon) ? break : (s += d)
-    end
-    r = -(eulergamma + log(z) + s)
-    return (typeof(z) <: Real ? real(r) : r)
-end
-
-# """
-# Upper incomplete gamma function.
-# """
-# function uigamma(a::Real, z::T; N=100, epsilon=1e-8) where {T<:Number}
-#     z == 0 && return gamma(a)
-#     u::T = z
-#     v::T = 0
-#     f::T = z
-# #     f::Complex = log(z)
-#     for n=1:N
-#         an, bn = (n%2==1) ? (div(n+1,2)-a, z) : (div(n,2), 1)
-#         u = bn + an / u
-#         v = bn + an * v
-#         f *= (u/v)
-# #         f += (log(α) - log(β))
-#         println("$(an), $(bn), $(u), $(v), $(f)")
-#         if abs(u/v-1) < epsilon
-#             break
-#         end
-#     end
-#     return z^a * exp(-z) / f
-# #     return z^a * exp(-z-f)
-# end
-
-
-doc"""
-    uigamma(s::Complex, z::Complex; N=100, epsilon=1e-20)
-
-Upper incomplete gamma function $\Gamma(s,z)$ with complex arguments.
-
-Computed using the [continued fraction representation](http://functions.wolfram.com/06.06.10.0005.01).
-The special case $\Gamma(0,z)$ is computed via the series expansion of the exponential integral $E_1(z)$.
-
-# Reference
-- [Upper incomplete gamma function](https://en.wikipedia.org/wiki/Incomplete_gamma_function)
-- [Continued fraction representation](http://functions.wolfram.com/06.06.10.0005.01)
-- [Exponential integral](https://en.wikipedia.org/wiki/Exponential_integral)
-"""
-
-function uigamma(s::Number, z::Number; N=100, epsilon=1e-20)
-    if abs(s) == 0
-        return uigamma0(z; N=N, epsilon=epsilon)
-    end
-
-    r = gamma(s) - z^s * exp(-z) / _uigamma_cf(Complex(s), Complex(z); N=N, epsilon=epsilon)
-    return (typeof(s)<:Real && typeof(z)<:Real) ? real(r) : r
-end
-
-doc"""
-    ligamma(s::Complex, z::Complex; N=100, epsilon=1e-20)
-
-Lower incomplete gamma function $\gamma(s,z)$ with complex arguments.
-"""
-function ligamma(s::Number, z::Number; N=100, epsilon=1e-20)
-    return gamma(s) - uigamma(s, z; N=N, epsilon=epsilon)
-end
-
-
 """
 Evaluate the Fourier transform of B-Spline wavelet.
-
-# Args
-* ω: frequency
-* v: vanishing moments
 """
-function bspline_ft(ω::Real, v::Int)
+function _bspline_ft(ω::Real, v::Int)
 #     @assert v>0  # check vanishing moment
-    return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(√2*1im*ω))^(v)
+    # return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(√2*1im*ω))^(v)  # non-centered bspline: supported on [0, v]
+    return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(√2*1im*ω) * exp(-1im*ω/2))^(v)  # centered bspline: supported on [-v/2, v/2]
 end
 
 
 """
-Evaluate the integrand function of C^ψ_{H,ρ}
+Evaluate the integrand function of G^ψ_{ρ}
 
 # Args
 * ω: frequency
 * v: vanishing moments
 """
-function Cbspline_intfunc(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
+function Gfunc_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
     #     @assert ρ>0
     #     @assert 1>H>0
     s = √ρ
-    return (ω==0) ? 0 : real(bspline_ft(ω*s, v) * conj(bspline_ft(ω/s, v)) / abs(ω)^(2H+1) * exp(-1im*ω*τ))
+    return (ω==0) ? 0 : real(_bspline_ft(ω*s, v) * conj(_bspline_ft(ω/s, v)) / abs(ω)^(2H+1) * exp(-1im*ω*τ))
 end
 
-function Cbspline_intfunc_expand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
+"""
+Expanded and centered version.
+"""
+function Gfunc_bspline_integrand_expand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
     #     @assert ρ>0
     #     @assert 1>H>0
     s = √ρ
-    # Version 1: non centered ψ. This does not work and produces artefacts of radiancy straight lines
+    # # Version 1: non centered ψ. This works with convolution mode `:left`` and produces artefacts of radiancy straight lines
     # return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*v*(s-1/s)/2 - ω*τ) / abs(ω)^(2v+2H+1)
-    # Version 2: centered ψ. This works when τ=0 (no time-lag), otherwise the radius of concentric circles are wrong.
+    # Version 2: centered ψ. This works with convolution mode `:center`
     return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*τ) / abs(ω)^(2v+2H+1)
 end
-            
+
 """
-Evaluate the C^ψ_{H,ρ} function by numerical integration.
+Evaluate the G^ψ_{ρ} function by numerical integration.
 
 # Args
 """
-function Cbspline_func(τ::Real, ρ::Real, H::Real, v::Int)
-    f = ω -> Cbspline_intfunc_expand(τ, ω, ρ, H, v)
-    # f = ω -> Cbspline_intfunc(τ, ω, ρ, H, v)
+function Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int)
+    f = ω -> Gfunc_bspline_integrand_expand(τ, ω, ρ, H, v)
+    # f = ω -> Gfunc_bspline_integrand(τ, ω, ρ, H, v)
 
     # res = QuadGK.quadgk(f, -100, 100, order=10)
     res = QuadGK.quadgk(f, -50, 50)
@@ -766,13 +524,18 @@ end
 
 
 """
-Evaluate matrix in DCWT
+Evaluate G-matrix in DCWT
 
-TODO: parallelization!
+# Notes
+- The true scale is two times scale index due to the special implementation of B-Spline wavelet, see also `_intscale_bspline_filter()`.
+- TODO: parallelization!
 """
-function Cbspline_matrix(H::Real, v::Int, lag::Int, sclrng::AbstractArray)    
-    return [Cbspline_func(lag/sqrt(i*j), j/i, H, v) for i in sclrng, j in sclrng]
+function Gmat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractArray)
+    # true scale is 2i hence the extra 1/2 factor
+    return [Gfunc_bspline(lag/sqrt(i*j)/2, j/i, H, v) for i in sclrng, j in sclrng]
 end
+
+
 #     A = zeros((length(sclrng),length(sclrng)))
 
 #     # Parallelization!
