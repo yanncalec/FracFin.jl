@@ -17,6 +17,9 @@ import Wavelets.Util.mirror
 import DataFrames
 import GLM
 import QuadGK
+import Optim
+import ForwardDiff
+import Calculus
 
 """
     Exception for not implemented methods.

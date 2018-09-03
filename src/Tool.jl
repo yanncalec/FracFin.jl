@@ -1,5 +1,19 @@
 ##### Algebra #####
 
+"""
+Vandermonde matrix.
+"""
+function vandermonde(dim::Tuple{Int,Int})
+    nrow, ncol = dim
+    V = zeros(Float64, dim)
+    for c=1:dim[2]
+        V[:,c] = collect((1:dim[1]).^(c-1))
+    end
+    return V
+end
+
+vandermonde(nrow::Int, ncol::Int) = vandermonde((nrow, ncol))
+
 function col_normalize(A::Matrix, p::Real=2)
     return A / diagm([norm(A[:,n], p) for n=1:size(A,2)])
 end
@@ -13,6 +27,18 @@ end
 
 row_normalize(A) = col_normalize(A.')
 row_normalize!(A) = col_normalize!(A.')
+
+##### Useful functions #####
+
+"""
+Sigmoid function.
+"""
+sigmoid(α::Real) = exp(α)/(1+exp(α))
+
+"""
+Derivative of sigmoid function.
+"""
+diff_sigmoid(α::Real) = exp(α)/(1+2*exp(α)+exp(2α))
 
 
 ##### Wavelet transform #####
@@ -283,21 +309,6 @@ end
 
 
 """
-Vandermonde matrix.
-"""
-function vandermonde(dim::Tuple{Int,Int})
-    nrow, ncol = dim
-    V = zeros(Float64, dim)
-    for c=1:dim[2]
-        V[:,c] = collect((1:dim[1]).^(c-1))
-    end
-    return V
-end
-
-vandermonde(nrow::Int, ncol::Int) = vandermonde((nrow, ncol))
-
-
-"""
 Continuous wavelet transform based on quadrature.
 
 # Args
@@ -481,6 +492,7 @@ function _bspline_ft(ω::Real, v::Int)
 end
 
 
+#### mBm wavelet analysis ####
 """
 Evaluate the integrand function of G^ψ_{ρ}
 
@@ -509,6 +521,14 @@ function Gfunc_bspline_integrand_expand(τ::Real, ω::Real, ρ::Real, H::Real, v
 end
 
 """
+Derivative w.r.t. H
+"""
+function diff_Gfunc_bspline_integrand_expand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
+    s = √ρ
+    return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*τ) * (-2 * log(abs(ω))) / abs(ω)^(2v+2H+1)
+end
+
+"""
 Evaluate the G^ψ_{ρ} function by numerical integration.
 
 # Args
@@ -517,17 +537,26 @@ function Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int)
     f = ω -> Gfunc_bspline_integrand_expand(τ, ω, ρ, H, v)
     # f = ω -> Gfunc_bspline_integrand(τ, ω, ρ, H, v)
 
+    # return Calculus.integrate(f, -50, 50)
     # res = QuadGK.quadgk(f, -100, 100, order=10)
-    res = QuadGK.quadgk(f, -50, 50)
+    res = QuadGK.quadgk(f, -50., 50.)
     return res[1]
 end
 
+"""
+Derivative w.r.t. H
+"""
+function diff_Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int)
+    f = ω -> diff_Gfunc_bspline_integrand_expand(τ, ω, ρ, H, v)
+    res = QuadGK.quadgk(f, -50., 50.)
+    return res[1]
+end
 
 """
 Evaluate G-matrix in DCWT
 
 # Notes
-- The true scale is two times scale index due to the special implementation of B-Spline wavelet, see also `_intscale_bspline_filter()`.
+- The true scale is two times the scale index due to the special implementation of B-Spline wavelet, see also `_intscale_bspline_filter()`.
 - TODO: parallelization!
 """
 function Gmat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractArray)
@@ -549,4 +578,21 @@ end
 #     end
 #     return A
 # end
+
+"""
+Function C^1_ρ(τ, H)
+"""
+C1rho(τ::Real, ρ::Real, H::Real, vm::Int) = gamma(2H+1) * sin(π*H) * Gfunc_bspline(τ, ρ, H, vm)
+
+diff_gamma = x -> ForwardDiff.derivative(gamma, x)
+
+"""
+Derivative w.r.t. H
+"""
+function diff_C1rho(τ::Real, ρ::Real, H::Real, vm::Int)
+    d1 = 2 * diff_gamma(2H+1) * sin(π*H) * Gfunc_bspline(τ, ρ, H, vm)
+    d2 = gamma(2H+1) * cos(π*H) * π * Gfunc_bspline(τ, ρ, H, vm)
+    d3 = gamma(2H+1) * sin(π*H) * diff_Gfunc_bspline(τ, ρ, H, vm)
+    return d1 + d2 + d3
+end
 

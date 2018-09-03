@@ -44,7 +44,6 @@ applied in a similar way as above.
 The intercepts in both OLS are supposed to be zero. To extract the estimation of H and σ, use
 the function `powlaw_coeff`.
 """
-
 function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, pows::AbstractArray{T}; splstep::Real=1.) where {T<:Real}
     # Define the function for computing the p-th moment of the increment
     moment_incr(X,d,p) = mean((abs.(X[d+1:end] - X[1:end-d])).^p)
@@ -108,3 +107,91 @@ function powlaw_coeff(ols::Dict, h::Float64)
     return H, σ
 end
 
+
+##### Generalized scalogram #####
+
+
+##### MLE #####
+
+
+
+##### Wavelet-MLE #####
+
+function Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray, vm::Int, H::Real, s::Real)
+    N, d = size(X)  # length and dim of X
+    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+    C1 = [C1rho(0, j/i, H, vm) for i in sclrng, j in sclrng]
+    Σ = s * C1 .* A
+    iX = Σ \ X'
+    return -1/2 * (trace(X*iX) + N*log(abs(det(Σ))) + N*d*log(2π))
+end
+
+function grad_Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray, vm::Int, H::Real, s::Real)
+    N, d = size(X)  # length and dim of X
+    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+    dAda = [log(i*j) for i in sclrng, j in sclrng] .* A
+
+    C1 = [C1rho(0, j/i, H, vm) for i in sclrng, j in sclrng]
+    dC1da = [diff_C1rho(0, j/i, H, vm) for i in sclrng, j in sclrng]
+
+    Σ = s^2 * C1 .* A
+    dΣda = s^2 * (dC1da .* A + C1 .* dAda)
+    dΣdb = 2s * C1 .* A
+
+    iX = Σ \ X'
+    da = N * trace(Σ \ dΣda) - trace(iX' * dΣda * iX)
+    db = N * trace(Σ \ dΣdb) - trace(iX' * dΣdb * iX)
+
+    return  -1/2 * [da, db]
+end
+
+# MLE with constraints by change of variable
+C1sgm(α::Real, ρ::Real, vm::Int) = C1rho(0, ρ, sigmoid(α), vm)
+diff_C1sgm(α::Real, ρ::Real, vm::Int) = diff_C1rho(0, ρ, sigmoid(α), vm) * diff_sigmoid(α)
+
+function Wavelet_MLE_obj_sgm(X::Matrix{Float64}, sclrng::AbstractArray, vm::Int, α::Real, β::Real)
+    N, d = size(X)  # length and dim of X
+    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2*sigmoid(α)+1)
+    C1 = [C1sgm(α, j/i, vm) for i in sclrng, j in sclrng]
+    Σ = exp(2β) * C1 .* A
+    iX = Σ \ X'
+#     iΣ = pinv(Σ)  # regularization by pseudo-inverse
+#     iX = iΣ * X'
+    return -1/2 * (trace(X*iX) + N*log(abs(det(Σ))) + N*d*log(2π))
+end
+
+function grad_Wavelet_MLE_obj_sgm(X::Matrix{Float64}, sclrng::AbstractArray, vm::Int, α::Real, β::Real)
+    N, d = size(X)  # length and dim of X
+    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2*sigmoid(α)+1)
+    dAda = diff_sigmoid(α) * [log(i*j) for i in sclrng, j in sclrng] .* A
+
+#     C1 = zeros(length(sclrng), length(sclrng))
+#     dC1da = zeros(C1)
+#     for (r,i) in enumerate(sclrng)
+#         for (c,j) in enumerate(sclrng)
+#             C1sgm_ij = a -> C1sgm(a, j/i, vm)
+#             diff_C1sgm_ij = x -> ForwardDiff.derivative(C1sgm_ij, x)
+#             C1[r,c] = C1sgm_ij(α)
+#             dC1da[r,c] = diff_C1sgm_ij(α)
+#         end
+#     end
+
+    C1 = [C1sgm(α, j/i, vm) for i in sclrng, j in sclrng]
+    dC1da = [diff_C1sgm(α, j/i, vm) for i in sclrng, j in sclrng]
+
+    Σ = exp(2β) * C1 .* A
+#     Σ += eye(Σ) * 1e-8
+    dΣda = exp(2β) * (dC1da .* A + C1 .* dAda)
+    dΣdb = 2*Σ
+
+#     iΣ = pinv(Σ)  # regularization by pseudo-inverse
+#     iX = iΣ * X'
+#     da = N * trace(iΣ * dΣda) - trace(iX' * dΣda * iX)
+#     db = N * trace(iΣ * dΣdb) - trace(iX' * dΣdb * iX)
+
+    iX = Σ \ X'
+    da = N * trace(Σ \ dΣda) - trace(iX' * dΣda * iX)
+    db = N * trace(Σ \ dΣdb) - trace(iX' * dΣdb * iX)
+
+    return  -1/2 * [da, db]
+end
