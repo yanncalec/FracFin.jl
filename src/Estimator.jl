@@ -110,6 +110,9 @@ end
 
 ##### Generalized scalogram #####
 
+function generalized_scalogram_estim(ρ::Int)
+
+end
 
 ##### MLE #####
 

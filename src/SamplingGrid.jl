@@ -49,9 +49,9 @@ struct RegularGrid{T} <: SamplingGrid{T}
     end
 
     """
-    Inner constructor from `Range` type.
+    Inner constructor from `AbstractRange` type.
     """
-    function RegularGrid{T}(g::Range) where T
+    function RegularGrid{T}(g::AbstractRange) where T
         RegularGrid{T}(T(g[1]), T(g[2]-g[1]), T(g[end]))
     end
 end
@@ -65,7 +65,7 @@ function RegularGrid(start, step, stop)
     RegularGrid{T}(start, step, stop)
 end
 
-function RegularGrid(g::Range)
+function RegularGrid(g::AbstractRange)
     # T0 = typeof(g[1])
     # T = T0 <: DiscreteTime ? DiscreteTime : ContinuousTime
     # step = T(g[2]-g[1])
@@ -87,9 +87,9 @@ function getindex(g::RegularGrid{T}, i::Integer) where T
 #     @boundscheck ((i > 0) & (ret <= g.stop) & (ret >= g.start)) || throw(BoundsError(g, i))
 end
 
-convert(::Type{RegularGrid}, g::Range) = RegularGrid(g[1], g[2]-g[1], g[end])
+convert(::Type{RegularGrid}, g::AbstractRange) = RegularGrid(g[1], g[2]-g[1], g[end])
 
-# function convert(::Type{RegularGrid}, g::Range)
+# function convert(::Type{RegularGrid}, g::AbstractRange)
 #     T = DiscreteTime ? typeof(g[1])<:Integer : ContinuousTime
 #     return convert(Type{RegularGrid{T}}, g)
 # end
