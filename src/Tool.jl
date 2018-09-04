@@ -1,6 +1,66 @@
 ##### Algebra #####
 
 """
+    LevinsonDurbin(cseq::Vector{Float64})
+
+Diagonalization of a symmetric positive definite Toeplitz matrix using Levinson-Durbin (LD) method by providing `cseq`, 
+the covariance sequence of a stationary process.
+
+# Outputs
+- `pseq::Vector{Vector{Float64}}`: linear prediction coefficients
+- `sseq`: variances of residual
+- `rseq`: partial correlation coefficients
+
+# Explanation
+`pseq` forms the lower triangular matrix diagonalizing the covariance matrix Γ, and `sseq` forms the resulting diagonal matrix. `rseq[n]` is just `pseq[n][n]`.
+"""
+function LevinsonDurbin(cseq::Vector{Float64})
+    N = length(cseq)
+
+    if N > 1
+        # check that cseq is a validate covariance sequence
+        @assert cseq[1] > 0
+        @assert all(abs.(cseq[2:end]) .<= cseq[1])
+        # @assert all(diff(abs.(cseq)) .<= 0)
+
+        # initialization
+        # pseq: linear prediction coefficients
+        pseq = Vector{Vector{Float64}}(N-1); pseq[1] = [cseq[2]/cseq[1]]
+        # sseq: variances of residual
+        sseq = zeros(N); sseq[1] = cseq[1]; sseq[2] = (1-pseq[1][1]^2) * sseq[1]
+        # rseq: partial correlation coefficients
+        rseq = zeros(N-1); rseq[1] = pseq[1][1]
+
+        # recursive construction of the prediction coefficients and variances
+        for n=2:N-1
+            pseq[n] = zeros(n)
+            pseq[n][n] = (cseq[n+1] - cseq[2:n]' * pseq[n-1][end:-1:1]) / sseq[n]
+            pseq[n][1:n-1] = pseq[n-1] - pseq[n][n] * pseq[n-1][end:-1:1]
+            sseq[n+1] = (1 - pseq[n][n]^2) * sseq[n]
+            rseq[n] = pseq[n][n]
+        end
+    else
+        pseq = Vector{Float64}[]
+        sseq = copy(cseq)
+        rseq = Float64[]
+    end
+    return pseq, sseq, rseq
+end
+
+LevinsonDurbin(p::StationaryProcess{T}, g::RegularGrid{<:T}) where T = LevinsonDurbin(covseq(p, g))
+
+
+"""
+Cholesky decomposition based on SVD.
+"""
+function chol_svd(W::Matrix{Float64})
+    Um,Sm,Vm=svd((W+W')/2)  # svd of forced symmetric matrix
+    Ss = sqrt.(Sm[Sm.>0])  # truncation of negative singular values
+    return Um*diagm(Ss)
+end
+
+
+"""
 Vandermonde matrix.
 """
 function vandermonde(dim::Tuple{Int,Int})
@@ -20,13 +80,13 @@ end
 
 function col_normalize!(A::Matrix, p::Real=2)
     for n=1:size(A,2)
-        A[:,n] /= norm(A[:,n], p)
+        A[:,n] ./= norm(A[:,n], p)
     end
     return A
 end
 
-row_normalize(A) = col_normalize(A.')
-row_normalize!(A) = col_normalize!(A.')
+row_normalize(A) = col_normalize(transpose(A))
+row_normalize!(A) = col_normalize!(transpose(A))
 
 ##### Useful functions #####
 
@@ -103,7 +163,7 @@ function wavefunc(lo::Vector{Float64}, hi::Vector{Float64}=Float64[]; level::Int
 #     ϕ = real(V[:, idx])
 
     # Normalization: this is necessary to get the correct numerical range
-    ϕ /= sum(ϕ)
+    ϕ ./= sum(ϕ)
     ψ = Float64[]
 
     fct = sqrt(2)  # scaling factor
@@ -132,8 +192,8 @@ function wavefunc(lo::Vector{Float64}, hi::Vector{Float64}=Float64[]; level::Int
 
     if nflag # force unit norm
         δ = g[2]-g[1]  # step of the sampling grid
-        ϕ /= sqrt(ϕ' * ϕ * δ)
-        ψ /= sqrt(ψ' * ψ * δ)
+        ϕ ./= sqrt(ϕ' * ϕ * δ)
+        ψ ./= sqrt(ψ' * ψ * δ)
     end
 
     return ϕ, ψ, g
@@ -170,17 +230,17 @@ function convmask(nx::Int, nh::Int, mode::Symbol)
     kmask = zeros(Bool, nx+nh-1)
 
     if mode == :left
-        kmask[1:nx] = true
+        kmask[1:nx] .= true
     elseif mode == :right
-        kmask[nh:end] = true  # or mask0[end-nx+1:end] = true
+        kmask[nh:end] .= true  # or mask0[end-nx+1:end] = true
     elseif mode == :center
         m = max(1, div(nh, 2))
-        kmask[m:m+nx-1] = true
+        kmask[m:m+nx-1] .= true
     else
         error("Unknown mode: $mode")
     end
 
-    vmask = zeros(Bool, nx+nh-1); vmask[nh:nx] = true
+    vmask = zeros(Bool, nx+nh-1); vmask[nh:nx] .= true
     return kmask, vmask
 end
 
@@ -248,7 +308,7 @@ function biconv_filter(lo::Vector{T}, hi::Vector{T}, n::Int) where T<:Number
     @assert n>=0
     F0::Vector{Vector{T}}=[]
     for l=0:n+1
-        s = reduce(∗, reduce(∗, [1], [hi for i=1:l]), [lo for i=l+1:n+1])
+        s = reduce(∗, [lo for i=l+1:n+1]; init=reduce(∗, [hi for i=1:l]))
         push!(F0, s)
     end
     return hcat(F0...)
@@ -429,7 +489,7 @@ function _intscale_bspline_filter(k::Int, v::Int)
     hi = vcat(ones(Float64, k), -ones(Float64, k))
     # Analogy of the continuous case:
     # the l^2 norm of the rescaled filter ψ[⋅/k] is √k
-    b0 = reduce(∗, [1], [hi for n=1:v])
+    b0 = reduce(∗, [hi for n=1:v])
 
     # # force even-length kernel
     # if mod(length(b0),2) == 1

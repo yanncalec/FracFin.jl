@@ -1,3 +1,5 @@
+########## Simulation methods (sampler) for stochastic process ##########
+
 """
 Abstract sampler for a stochastic process.
 
@@ -21,10 +23,10 @@ const DiscreteTimeSampler{P, G} = Sampler{DiscreteTime, P, G}
 Random sampling function for an initialized sampler.
 """
 rand!(x::Vector{Float64}, s::Sampler) = throw(NotImplementedError("rand!(::Vector{Float64}, ::$(typeof(s)))"))
-rand(s::Sampler) = rand!(Vector{Float64}(length(s)), s)
+rand(s::Sampler) = rand!(zeros(Float64, length(s)), s)
 
 """
-Random sampling function for a process of increment
+Random sampling function for a process of increment.
 """
 function rand(::Type{R}, s::Sampler{DiscreteTime, <:IncrementProcess{DiscreteTime,R}, DiscreteTimeRegularGrid}) where R
     if s.grid.step == 1
@@ -52,12 +54,12 @@ size(s::Sampler) = size(s.grid,)
 Initialize a sampler for fGn.
 
 # Arguments
-* H: hurst exponent
-* N: number of points of the regular sampling grid
-* name: name of the sampling method: {"CHOLESKY", "CIRCULANT", "HOSKING", "MIDPOINT", "WAVELET"}
+- H: hurst exponent
+- N: number of points of the regular sampling grid
+- name: name of the sampling method: {"CHOLESKY", "CIRCULANT", "HOSKING", "MIDPOINT", "WAVELET"}
 
-# Returns:
-* an object of sampler
+# Returns
+- an object of sampler
 """
 function init_sampler_fGn(H::Float64, N::Integer, name::String)
     @assert 0. < H < 1.
@@ -92,7 +94,7 @@ end
 """
     rand_fGn(sampler::Sampler, Tmax::Real=1.)
 
-Random sampling of fGn on the interval [0, `Tmax`] by applying an initialized sampler.
+Generate a sample trajectory of fGn on the interval [0, `Tmax`] by applying an initialized sampler.
 """
 function rand_fGn(sampler::Sampler, Tmax::Real=1.)
     T = typeof(sampler)
@@ -116,12 +118,12 @@ end
 Initialize a sampler for fBm.
 
 # Arguments
-* H: hurst exponent
-* N: number of points of the regular sampling grid
-* name: name of the sampling method: {"CHOLESKY", "CIRCULANT", "HOSKING", "MIDPOINT", "WAVELET"}
+- H: hurst exponent
+- N: number of points of the regular sampling grid
+- name: name of the sampling method: {"CHOLESKY", "CIRCULANT", "HOSKING", "MIDPOINT", "WAVELET"}
 
 # Returns:
-* an object of sampler
+- an object of sampler
 """
 function init_sampler_fBm(H::Float64, N::Integer, name::String)
     @assert 0. < H < 1.
@@ -157,7 +159,7 @@ end
 """
     rand_fBm(sampler::Sampler, Tmax::Real=1.)
 
-Random sampling of fBm on the interval [0, `Tmax`] by applying an initialized sampler.
+Generate a sample trajectory of fBm on the interval [0, `Tmax`] by applying an initialized sampler.
 """
 function rand_fBm(sampler::Sampler, Tmax::Real=1.)
     T = typeof(sampler)
@@ -174,16 +176,19 @@ function rand_fBm(sampler::Sampler, Tmax::Real=1.)
         X = δ^H * rand(sampler)
     end
 
-    X -= X[1]  # force starting from 0
+    X .-= X[1]  # force starting from 0
     return X
 end
 
 
+######## Sampler for pure fBm and related processes ########
+
+#### Cholesky ####
 """
 Cholesky sampler for general Gaussian process.
 
 # Notes
-* This method draws the sample trajectory on any sampling grid adapted to the underlying process.
+- This method generates a sample trajectory on any type of sampling grid (regular or arbitrary) adapted to the underlying process.
 """
 struct CholeskySampler{T, P, G}<:Sampler{T, P, G}
     proc::P  # instance of the stochastic process
@@ -208,15 +213,16 @@ end
 CholeskySampler(p::StochasticProcess{T}, g::SamplingGrid{<:T}) where T = CholeskySampler{T, typeof(p), typeof(g)}(p, g)
 
 function rand!(x::Vector{Float64}, s::CholeskySampler)
-    return copy!(x, s.lmat * randn(length(s)))
+    return copyto!(x, s.lmat * randn(length(s)))
 end
 
 
+#### Circulant Embedding ####
 """
 Circulant embedding sampler for stationary Gaussian process.
 
 # Notes
-* This method draws the sample trajectory on any sampling grid adapted to the underlying process.
+- This method generates a sample trajectory on any sampling grid adapted to the underlying process.
 """
 struct CircSampler{T, P<:StationaryProcess{T}, G<:RegularGrid{<:T}}<:Sampler{T, P, G}
     proc::P  # instance of the stochastic process
@@ -236,7 +242,7 @@ struct CircSampler{T, P<:StationaryProcess{T}, G<:RegularGrid{<:T}}<:Sampler{T, 
         # check the non-negative constraint
         idx = cf .< 0.
         any(idx) && warn("Negative eigenvalues encountered, using Wood-Chan approximation.")
-        cf[idx] = 0.
+        cf[idx] .= 0.
         new(p, g, c, sqrt.(cf))
     end
 end
@@ -245,12 +251,12 @@ CircSampler(p::StationaryProcess{T}, g::RegularGrid{<:T}) where T = CircSampler{
 
 # function rand!(x::Vector{Complex128}, s::CircSampler{P, G}) where {P, G}
 function rand!(x::Vector{Float64}, s::CircSampler)
-    @assert length(x) <= length(s)
+    # @assert length(x) <= length(s)
     M = length(s.fseq)
     z = randn(M) + im * randn(M)
     # y = real(ifft(s.fseq .* fft(z)))
     y = real(ifft(s.fseq .* z) * sqrt(M))
-    return copy!(x, y[1:length(x)])
+    return copyto!(x, y[1:length(x)])
 end
 
 """
@@ -276,17 +282,7 @@ function circulant_embedding(c::Vector{Float64})
 end
 
 
-# """
-# # Note
-# For FARIMA{0,0} process the partial correlation is explicitly given by:
-#     TODO
-#     [pseq[n][n] == partcorr(p, n) || error("Error in partcorr() of FARIMA process.") for n in 1:N-1]
-# end
-
-# construct the triangular Cholesky decomposition pmat satisfying the identity:
-# pmat' * cmat * pmat = diag(sseq)
-# """
-
+#### Hosking ####
 """
 Hosking (Levinson-Durbin) sampler for staionary Gaussian process.
 
@@ -349,7 +345,7 @@ On-the-fly sampling using Levinson-Durbin algorithm. The partial auto-correlatio
 function rand_otf!(x::Vector{Float64}, p::StationaryProcess{T}, g::RegularGrid{<:T}) where T
     # println("Stationary otf")
     # check dimension
-    @assert length(x) <= length(g)
+    # @assert length(x) <= length(g)
 
     # generate the first sample
     γ0 = autocov(p, 0)
@@ -414,13 +410,14 @@ function rand(p::FARIMA, s::HoskingSampler{T, <:FractionalIntegrated, G}) where 
 end
 
 
-doc"""
+#### CRMD ####
+"""
 Conditionalized random midpoint displacement (CRMD) sampler for the increment process of SSSI process, e.g. a fGn.
 
 # Notes
-* The step of increment process (e.g. a fGn) must be equal to 1, this is crucial since the Yule-Walker equations in our implementation is de-scaled.
-* The original CRMD method draws the sample trajectory on the interval [0,1]. However in our implementation a scaling factor is applied at the end so that the final trajectory are samples of a discrete fGn process (i.e. of unit step).
-* The sampling grid used in this method corresponds to the index of the sampling points but not their physical position in [0,1].
+- The step of increment process (e.g. a fGn) must be equal to 1, this is crucial since the Yule-Walker equations in our implementation is de-scaled.
+- The original CRMD method draws the sample trajectory on the interval [0,1]. However in our implementation a scaling factor is applied at the end so that the final trajectory are samples of a discrete fGn process (i.e. of unit step).
+- The sampling grid used in this method corresponds to the index of the sampling points but not their physical position in [0,1].
 """
 struct CRMDSampler{P<:IncrementSSSIProcess}<:DiscreteTimeSampler{P, DiscreteTimeRegularGrid}
     proc::P  # instance of the stochastic process
@@ -442,17 +439,17 @@ struct CRMDSampler{P<:IncrementSSSIProcess}<:DiscreteTimeSampler{P, DiscreteTime
     Constructor of CRMDSampler.
 
     # Arguments
-    * p: object of `IncrementSSSIProcess`.
-    * g: discrete-time regular sampling grid, the step can be >= 1.
-    * w: moving window size.
-    * jmin: index of the coarsest scale.
+    - p: object of `IncrementSSSIProcess`.
+    - g: discrete-time regular sampling grid, the step can be >= 1.
+    - w: moving window size.
+    - jmin: index of the coarsest scale.
 
     # Notes
-    * The step of increment process `p` (e.g. a fGn) must be equal to 1, this is crucial since the Yule-Walker equations in our implementation is de-scaled.
-    * the grid `g` is used only at the end: the generated trajectory with unit step is restricted on `g` to obtain the (down-sampled) trajectory of desired length.
+    - The step of increment process `p` (e.g. a fGn) must be equal to 1, this is crucial since the Yule-Walker equations in our implementation is de-scaled.
+    - the grid `g` is used only at the end: the generated trajectory with unit step is restricted on `g` to obtain the (down-sampled) trajectory of desired length.
     """
     function CRMDSampler{P}(p::P, g::DiscreteTimeRegularGrid, w::Int64, jmin::Int64) where {P}
-        step(p) == 1. || error("Step of increment of the underlying process must be 1.")
+        step(p) == 1 || error("Step of increment of the underlying process must be 1.")
         @assert 1 <= w <= 2^jmin
         # 2^(Int(round(log2(length(g))))) == length(g) || error("Length of the sampling grid must be power of 2.")
         # jmin = 10  # coarse scale length = 2^jmin
@@ -498,7 +495,7 @@ end
 CRMDSampler(p::P, g::DiscreteTimeRegularGrid, w::Int64=10, jmin::Int64=10) where {P} = CRMDSampler{P}(p, g, w, jmin)
 
 function rand!(x::Vector{Float64}, s::CRMDSampler)
-    @assert length(x) <= length(s)
+    # @assert length(x) <= length(s)
 
     H = ss_exponent(s.proc)
     # sampling at the coarse scale using an exact sampler
@@ -509,9 +506,9 @@ function rand!(x::Vector{Float64}, s::CRMDSampler)
         x0 = rand_rfn(x0, s)
     end
     # x0 is a sample trajectory of ${X^\delta_H(n)}_{n=0...N-1} $ with $\delta=1/N$ on the interval $[0,1]$. To obtain a sample trajectory of $X^1_H$, apply the scaling factor $N^H$.
-    x0 *= length(x0)^H
+    x0 .*= length(x0)^H
 
-    return copy!(x, x0[s.grid][1:length(x)])
+    return copyto!(x, x0[s.grid][1:length(x)])
 end
 
 function rand_rfn(x0::Vector{Float64}, s::CRMDSampler)
@@ -541,11 +538,12 @@ function rand_rfn(x0::Vector{Float64}, s::CRMDSampler)
 end
 
 
-doc"""
-Wavelet sampler for fractional integrated (fIt) process with $d\in (-1/2, 1/2)$.
+#### Wavelet ####
+"""
+Wavelet sampler for fractional integrated (fIt) process with d ∈ (-1/2, 1/2).
 
 # Notes
-* This method can generated FARIMA(0,H-1/2,0) as well as FARIMA(0, H+1/2,0) process for $H\in(0,1)$. The later corresponds to the partial sum of the former. The sampling grid corresponds to the index of the discrete samples. In the case of FARIMA(0, H+1/2, 0) the trajectory can approximate a fBm on the interval $[0,1]$ by proper rescaling.
+- This method can generated FARIMA(0,H-1/2,0) as well as FARIMA(0, H+1/2,0) process for H in (0,1). The later corresponds to the partial sum of the former. The sampling grid corresponds to the index of the discrete samples. In the case of FARIMA(0, H+1/2, 0) the trajectory can approximate a fBm on the interval [0,1] by proper rescaling.
 """
 struct WaveletSampler<:DiscreteTimeSampler{FractionalIntegrated, DiscreteTimeRegularGrid}
     proc::FractionalIntegrated  # instance of the stochastic process
@@ -561,9 +559,9 @@ struct WaveletSampler<:DiscreteTimeSampler{FractionalIntegrated, DiscreteTimeReg
     Constructor of WaveletSampler.
 
     # Arguments
-    * p: fractional integrated process, with the parameters d=H-1/2 and H the Hurst exponent
-    * r: regularity of the wavelet function, must be strictly larger than s=H+1/2
-    * psflag: if true generate a trajectory of FARIMA(0, H+1/2, 0), otherwise generate FARIMA(0, H-1/2, 0).
+    - p: fractional integrated process, with the parameters d=H-1/2 and H the Hurst exponent
+    - r: regularity of the wavelet function, must be strictly larger than s=H+1/2
+    - psflag: if true generate a trajectory of FARIMA(0, H+1/2, 0), otherwise generate FARIMA(0, H-1/2, 0).
     """
     function WaveletSampler(p::FractionalIntegrated, g::DiscreteTimeRegularGrid; r=5, jmin=10, max_len=40, psflag=true)
         # jmin = 10  # coarse scale index
@@ -626,7 +624,7 @@ end
 
 
 function rand!(x::Vector{Float64}, s::WaveletSampler)
-    @assert length(x) <= length(s)
+    # @assert length(x) <= length(s)
 
     # sampling at the coarse scale using an exact sampler
     x0 = rand(s.coarse_sampler)
@@ -643,11 +641,11 @@ function rand!(x::Vector{Float64}, s::WaveletSampler)
     # keep only the central part and force to start from 0
     n = max(Int(round((length(x0)-Ng)/2)), 1)
     x1 = x0[n:(n+Ng)] - x0[n]
-    return copy!(x, x1[s.grid][1:length(x)])
+    return copyto!(x, x1[s.grid][1:length(x)])
 end
 
 
-##### Multifractional Brownian motion related
+######## Sampler for multifractional Brownian motion (mBm) and related processes ########
 
 # Auxiliary functions for the covariance of the  multifractional field
 _D(h1,h2) = (h1==h2) ? 1. : sqrt(gamma(2*h1+1)*sin(pi*h1)*gamma(2*h2+1)*sin(pi*h2)) / (gamma(h1+h2+1)*sin(pi*(h1+h2)/2))
@@ -805,7 +803,7 @@ function condsampl_SfGn(Hgrid::Vector{Float64},
 end
 
 
-doc"""
+"""
 Conditionalized sampling of a sequence of fGn (SfGn).
 """
 struct SfGnSampler<:DiscreteTimeSampler{FractionalGaussianNoise, DiscreteTimeRegularGrid}
@@ -830,12 +828,12 @@ struct SfGnSampler<:DiscreteTimeSampler{FractionalGaussianNoise, DiscreteTimeReg
 end
 
 function rand!(x::Vector{Float64}, s::SfGnSampler)
-    @assert length(x) <= length(s)
+    # @assert length(x) <= length(s)
 
     dW0 = condsampl_SfGn(s.hgrid, s.J, s.Ψ, s.Φ, s.R, s.C)
     N = length(s.grid)
     dY = ((1/N).^ s.Hurst) .* [dW0[n, s.hidx[n]] for n=1:N]
-    return copy!(x, cumsum(dY)[1:length(x)])
+    return copyto!(x, cumsum(dY)[1:length(x)])
 end
 
 # function rand_mBm(Hurst0, )

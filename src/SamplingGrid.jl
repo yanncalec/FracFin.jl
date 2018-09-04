@@ -1,26 +1,23 @@
-const DiscreteTime = Integer
-const ContinuousTime = Real
-
-promote_rule(ContinuousTime, DiscreteTime) = ContinuousTime
-
-"""
-Type of time index of a stochastic process: discrete time (Integer) or continuous time (Real).
-"""
-const TimeStyle = Union{DiscreteTime, ContinuousTime}
+########## Sampling grid for stochastic process ##########
 
 """
 Abstract sampling grid.
 """
+const SamplingGrid{T} = AbstractArray{T,1}
 # abstract type SamplingGrid{T} <: AbstractArray{T<:TimeStyle,1} end
 # const SamplingGrid{T<:TimeStyle} = AbstractArray{T,1}
 # const SamplingGrid{T} = AbstractArray{T<:TimeStyle,1}
-const SamplingGrid{T} = AbstractArray{T,1}
 
 const DiscreteTimeSamplingGrid = SamplingGrid{DiscreteTime}
 const ContinuousTimeSamplingGrid = SamplingGrid{ContinuousTime}
 
+# StepRangeLen{T,Base.TwicePrecision{T},Base.TwicePrecision{T}} where T
+
+# const DiscreteTimeSamplingGrid = StepRangeLen{}
+# const ContinuousTimeSamplingGrid = SamplingGrid{ContinuousTime}
+
 """
-Test if a sampling grid is valid.
+Test if a sampling grid is in a strictly increasing order.
 """
 isvalidgrid(g::SamplingGrid) = any(diff(g) .> 0)
 
@@ -94,7 +91,8 @@ convert(::Type{RegularGrid}, g::AbstractRange) = RegularGrid(g[1], g[2]-g[1], g[
 #     return convert(Type{RegularGrid{T}}, g)
 # end
 
-######## Multifractional related
+
+##### Multifractional related #####
 """
     val2grid(X::Vector{Float64}, δ0::Float64=2.5e-2)
 
