@@ -1,6 +1,6 @@
 # Estimators for fractional processes.
 
-"""doc
+"""
 Estimate the Hurst exponent and the volatility using power law method.
 
 # Notations
@@ -130,17 +130,27 @@ end
 #     return hurst_estim, ols_hurst
 # end
 
-function scalogram_estim(C::Matrix{Float64}, sclrng::AbstractArray{Int}, ρ::Int=1)
+"""
+    scalogram_estim(C::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, ρ::Int=1)
+
+Scalogram estimator for Hurst exponent and volatility.
+"""
+function scalogram_estim(C::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, ρ::Int=1)
     @assert size(C,1) == size(C,2) == length(sclrng)
-    toto = [C[j, ρ*j] for j in 1:size(C,1) if ρ*j<=nr]
+
+    toto = [C[j, ρ*j] for j in 1:size(C,1) if ρ*j<=size(C,1)]
     yvar = abs.(toto)
     df = DataFrames.DataFrame(
-        X=log2.(sclrng[1:length(toto)]),
-        Y=log2.(abs.(toto))
+        X=log.(sclrng[1:length(toto)]),
+        Y=log.(abs.(toto))
     )
-    ols_hurst = GLM.lm(@GLM.formula(Y~X), df)
-    hurst_estim = (GLM.coef(ols_hurst)[2]-1)/2
-    return hurst_estim, ols_hurst, df
+    ols = GLM.lm(@GLM.formula(Y~X), df)
+    coef = GLM.coef(ols)
+    hurst_estim = (coef[2]-1)/2
+    C2 = C1rho(0, ρ, hurst_estim, v)
+    σ_estim = ℯ^((coef[1] - log(abs(C2)) - (hurst_estim+1/2)*log(ρ))/2)
+    
+    return (hurst_estim, σ_estim), ols, df
 end
 
 ##### MLE #####
