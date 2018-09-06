@@ -110,8 +110,37 @@ end
 
 ##### Generalized scalogram #####
 
-function generalized_scalogram_estim(ρ::Int)
+# function scalogram_estim(Cxx::Matrix{Float64}, sclrng::AbstractArray{Int}, ρmax::Int=1)
+#     nr, nc = size(Cxx)
+#     @assert nr == nc == length(sclrng)
+#     @assert ρmax >= 1
+#     xvar = Float64[]
+#     yvar = Float64[]
+#     for ρ=1:ρmax
+#         toto = [Cxx[j, ρ*j] for j in 1:nr if ρ*j<=nr]
+#         xvar = vcat(xvar, sclrng[1:length(toto)])
+#         yvar = vcat(yvar, abs.(toto))
+#     end
+#     df = DataFrames.DataFrame(
+#         xvar=log2.(xvar),
+#         yvar=log2.(yvar)
+#     )
+#     ols_hurst = GLM.lm(@GLM.formula(yvar~xvar), df)
+#     hurst_estim = (GLM.coef(ols_hurst)[2]-1)/2    
+#     return hurst_estim, ols_hurst
+# end
 
+function scalogram_estim(C::Matrix{Float64}, sclrng::AbstractArray{Int}, ρ::Int=1)
+    @assert size(C,1) == size(C,2) == length(sclrng)
+    toto = [C[j, ρ*j] for j in 1:size(C,1) if ρ*j<=nr]
+    yvar = abs.(toto)
+    df = DataFrames.DataFrame(
+        X=log2.(sclrng[1:length(toto)]),
+        Y=log2.(abs.(toto))
+    )
+    ols_hurst = GLM.lm(@GLM.formula(Y~X), df)
+    hurst_estim = (GLM.coef(ols_hurst)[2]-1)/2
+    return hurst_estim, ols_hurst, df
 end
 
 ##### MLE #####
