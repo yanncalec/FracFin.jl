@@ -11,6 +11,8 @@ import Distributions: VariateForm, Univariate, Multivariate, ValueSupport, Discr
 import StatsBase: autocov!, autocov
 using LinearAlgebra
 
+import SpecialFunctions: gamma, lgamma
+
 import DSP: conv, fft, ifft
 
 import Wavelets
