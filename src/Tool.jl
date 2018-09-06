@@ -6,7 +6,7 @@
 Diagonalization of a symmetric positive definite Toeplitz matrix using Levinson-Durbin (LD) method by providing `cseq`, 
 the covariance sequence of a stationary process.
 
-# Outputs
+# Returns
 - `pseq::Vector{Vector{Float64}}`: linear prediction coefficients
 - `sseq`: variances of residual
 - `rseq`: partial correlation coefficients
@@ -54,7 +54,7 @@ LevinsonDurbin(p::StationaryProcess{T}, g::RegularGrid{<:T}) where T = LevinsonD
 Cholesky decomposition based on SVD.
 """
 function chol_svd(W::Matrix{Float64})
-    Um,Sm,Vm=svd((W+W')/2)  # svd of forced symmetric matrix
+    Um, Sm, Vm = svd((W+W')/2)  # svd of forced symmetric matrix
     Ss = sqrt.(Sm[Sm.>0])  # truncation of negative singular values
     return Um*diagm(Ss)
 end
@@ -66,7 +66,7 @@ Vandermonde matrix.
 function vandermonde(dim::Tuple{Int,Int})
     nrow, ncol = dim
     V = zeros(Float64, dim)
-    for c=1:dim[2]
+    for c = 1:dim[2]
         V[:,c] = collect((1:dim[1]).^(c-1))
     end
     return V
@@ -135,12 +135,12 @@ Compute the scaling and the wavelet function using the cascade algorithm.
 The implementation follows the reference 2, but with a modified initialization.
 
 # Returns
-* ϕ, ψ, g: scaling, wavelet function and the associated sampling grid (computed for the Daubechies wavelet)
+- ϕ, ψ, g: scaling, wavelet function and the associated sampling grid (computed for the Daubechies wavelet)
 
 # References
-* https://en.wikipedia.org/wiki/Daubechies_wavelet
-* https://en.wikipedia.org/wiki/Cascade_algorithm
-* http://cnx.org/content/m10486/latest/
+- https://en.wikipedia.org/wiki/Daubechies_wavelet
+- https://en.wikipedia.org/wiki/Cascade_algorithm
+- http://cnx.org/content/m10486/latest/
 """
 function wavefunc(lo::Vector{Float64}, hi::Vector{Float64}=Float64[]; level::Int=10, nflag::Bool=true)
     if isempty(hi)
@@ -203,28 +203,28 @@ end
 """
 Compute the masks for convolution for a mode of truncation.
 
-For a input signal `x` and a kernel `h`, the full convolution x*h has length `length(x)+length(h)-1`.
-This function computes two masks:
+For a input signal `x` and a kernel `h`, the full convolution x*h has length `length(x)+length(h)-1`. This function computes two masks:
 - `kmask`: corresponds to the left/center/right part in x*h having the length of `x`
 - `vmask`: corresponds to the valide coefficients (boundary free) in x*h
 
-Note that `vmask` does not depend on `mode` and `vmask[kmask]` gives the mask of length of `x` corresponding
-to the valid coefficients in `kmask`.
+Note that `vmask` does not depend on `mode` and `vmask[kmask]` gives the mask of length of `x` corresponding to the valid coefficients in `kmask`.
 
 # Args
-* nx: length of input signal
-* nh: length of kernel
-* mode: {:left, :right, :center}
+- nx: length of input signal
+- nh: length of kernel
+- mode: {:left, :right, :center}
 
 # Returns
-* kmask, vmask
+- kmask, vmask
 
 # Examples
+```julia-repl
 julia> y = conv(x, h)
 julia> kmask, vmask = convmask(length(x), length(h), :center)
 julia> tmask = vmask[kmask]
 julia> y[kmask] # center part, same size as x
 julia> y[vmask] # valide part, same as y[kmask][dmask]
+```
 """
 function convmask(nx::Int, nh::Int, mode::Symbol)
     kmask = zeros(Bool, nx+nh-1)
@@ -273,12 +273,12 @@ end
 Compute filters of Wavelet Packet transform.
 
 # Args
-* lo: low-pass filter
-* hi: high-pass filter
-* n: level of decomposition. If n=0 the original filters are returned.
+- lo: low-pass filter
+- hi: high-pass filter
+- n: level of decomposition. If n=0 the original filters are returned.
 
-# Return
-* a matrix of size ?-by-2^n that each column is a filter.
+# Returns
+- a matrix of size ?-by-2^n that each column is a filter.
 """
 function wpt_filter(lo::Vector{T}, hi::Vector{T}, n::Int) where T<:Number
     F0::Vector{Vector{T}}=[[1]]
@@ -301,8 +301,8 @@ Compute
     x_0 ∗ x_1 ∗ ... x_{n-1}
 where x_i ∈ {lo, hi}, i.e. either the low or the high filter.
 
-# Return
-* a matrix of size ?-by-(level+1) that each column is a filter.
+# Returns
+- a matrix of size ?-by-(level+1) that each column is a filter.
 """
 function biconv_filter(lo::Vector{T}, hi::Vector{T}, n::Int) where T<:Number
     @assert n>=0
@@ -319,9 +319,9 @@ end
 Dyadic scale stationary wavelet transform using à trous algorithm.
 
 # Returns
-* ac: matrix of approximation coefficients with increasing scale index in column direction
-* dc: matrix of detail coefficients
-* mc: mask for valide coefficients
+- ac: matrix of approximation coefficients with increasing scale index in column direction
+- dc: matrix of detail coefficients
+- mc: mask for valide coefficients
 """
 function swt(x::Vector{Float64}, level::Int, lo::Vector{Float64}, hi::Vector{Float64}=Float64[];
         mode::Symbol=:center)
@@ -372,8 +372,8 @@ end
 Continuous wavelet transform based on quadrature.
 
 # Args
-* x: input signal
-* wfunc: function for evaluation of wavelet at integer scales
+- x: input signal
+- wfunc: function for evaluation of wavelet at integer scales
 """
 function cwt_quad(x::Vector{Float64}, wfunc::Function, sclrng::AbstractArray{Int}, mode::Symbol=:center)
     Ns = length(sclrng)
@@ -398,13 +398,13 @@ end
 Evaluate the wavelet function at integer scales by looking-up table.
 
 # Args
-* k: scale
-* ψ: compact wavelet function evaluated on a grid
-* Sψ: support of ψ
-* v: desired number of vanishing moments of ψ
+- k: scale
+- ψ: values of compact wavelet function on a grid
+- Sψ: support of ψ
+- v: desired number of vanishing moments of ψ
 
-# Return
-f: the vector (ψ(n/k))_n such that n/k lies in Sψ.
+# Returns
+- f: the vector (ψ(n/k))_n such that n/k lies in Sψ.
 
 # Note
 For accuracy, increase the density of grid for pre-evaluation of ψ.
@@ -432,6 +432,9 @@ function _intscale_wavelet_filter(k::Int, ψ::Vector{Float64}, Sψ::Tuple{Real,R
 end
 
 
+"""
+Evaluate the wavelet function at integer scales.
+"""
 function _intscale_wavelet_filter(k::Int, ψ::Function, Sψ::Tuple{Real,Real}, v::Int=0)
     # @assert k > 0
     # @assert Sψ[2] > Sψ[1]
@@ -450,78 +453,78 @@ end
 
 
 """
-Integer scale Haar filter.
+Integer (even) scale Haar filter.
 
-# Notes
-- The true scale is `2k`.
-- The filter is not normalized. Normalization comes from the 1/sqrt(k) factor in cwt_quad.
+The original Haar wavelet takes value 1 on [0,1/2) and -1 on [1/2, 1) and 0 elsewhere.
 """
-function _intscale_haar_filter(k::Int)
-    return vcat(ones(Float64, k), -ones(Float64, k)) / √2  # L2 norm = √k
+function _intscale_haar_filter(scl::Int)
+    @assert scl > 0 && iseven(scl)
+
+    k::Int = div(scl,2)
+    return vcat(ones(Float64, k), -ones(Float64, k))
 end
 
 
-"""
-Compute B-Spline filters.
-
-# Args
-* v: number of vanishing moments
-"""
-function bspline_filters(k::Int, v::Int)
-    @assert v>0
-    lo = vcat(ones(k), ones(k))
-    hi = vcat(ones(k),-ones(k))
-
-    # return col_normalize(wpt_filter(lo, hi, v-1)) * sqrt(k)
-    return col_normalize(biconv_filter(lo, hi, v-1)) * sqrt(k)
-end
+# """
+# Compute B-Spline filters of `v` vanishing moments at scale `2k`.
+# """
+# function bspline_filters(k::Int, v::Int)
+#     @assert v>0
+#     lo = vcat(ones(k), ones(k))
+#     hi = vcat(ones(k),-ones(k))
+#     # return col_normalize(wpt_filter(lo, hi, v-1)) * sqrt(k)
+#     return col_normalize(biconv_filter(lo, hi, v-1)) * sqrt(k)
+# end
 
 
 """
-B-Spline filter as the auto-convolution of Haar filter.
+Integer (even) scale B-Spline filter.
+
+This B-Spline filter is defined as the auto-convolution of Haar filter.
 
 # Notes
 - The true scale is `2k`, like in `_intscale_haar_filter`.
-- This filter is not normalized. A trick is used here to find the correct scaling.
+- A trick can be used to improve the scaling law at fine scales, but this corrupts the intercept with a unknown factor in the linear regression.
 """
-function _intscale_bspline_filter(k::Int, v::Int)
+function _intscale_bspline_filter(scl::Int, v::Int)
+    @assert scl > 0 && iseven(scl)
     @assert v>0
+
+    k::Int = div(scl,2)
     hi = vcat(ones(Float64, k), -ones(Float64, k))
-    # Analogy of the continuous case:
-    # the l^2 norm of the rescaled filter ψ[⋅/k] is √k
-    b0 = reduce(∗, [hi for n=1:v])
+    b0 = reduce(∗, [hi for n=1:v]) / (2k)^(v-1)
 
-    # # force even-length kernel
-    # if mod(length(b0),2) == 1
-    #     b0 = vcat(b0, 0)
-    # end
-
-    return normalize(b0) * sqrt(k)  # <- Trick!
+    return b0  # <-- without forced scaling.
+    # return normalize(b0) * sqrt(2k)  # <-- trick: forced scaling.
 end
-
-# function _intscale_bspline_filter_tight(k::Int, v::Int)
-#     @assert v>0
-#     ko = max(1, ones(k÷2))
-#     hi = if k%2 == 1 vcat(ko, -ko) else vcat(ko, 0, -ko) end
-#     b0 = reduce(∗, [1], [hi for n=1:v])
-#     return normalize(b0) * sqrt(k)  # <- Trick!
-# end
 
 
 """
 Continous Haar transform.
 """
 function cwt_haar(x::Vector{Float64}, sclrng::AbstractArray{Int}, mode::Symbol=:center)
+    all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
+
     return cwt_quad(x, _intscale_haar_filter, sclrng, mode)
 end
 
 
 """
-Continous B-Spline transform.
+    cwt_bspline(x::Vector{Float64}, sclrng::AbstractArray{Int}, v::Int, mode::Symbol=:center)
+
+Continous B-Spline transform at integer (even) scales.
+
+# Args
+- x: Input vector
+- sclrng: vector of integer scales, all numbers must be even
+- v: vanishing moment
+- mode: mode of convolution
 
 # TODO: parallelization
 """
 function cwt_bspline(x::Vector{Float64}, sclrng::AbstractArray{Int}, v::Int, mode::Symbol=:center)
+    all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
+
     # bsfilter = k->normalize(_intscale_bspline_filter(k, v))
     bsfilter = k->_intscale_bspline_filter(k, v)
     return cwt_quad(x, bsfilter, sclrng, mode)
@@ -546,9 +549,13 @@ end
 Evaluate the Fourier transform of B-Spline wavelet.
 """
 function _bspline_ft(ω::Real, v::Int)
-#     @assert v>0  # check vanishing moment
-    # return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(√2*1im*ω))^(v)  # non-centered bspline: supported on [0, v]
-    return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(√2*1im*ω) * exp(-1im*ω/2))^(v)  # centered bspline: supported on [-v/2, v/2]
+#     @assert v>0  # check vanishing moment   
+
+    # # Version 1: non centered ψ. This works with convolution mode `:left`` and produces artefacts of radiancy straight lines.
+    # return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(sqrt(2π)*1im*ω))^(v)  # non-centered bspline: supported on [0, v]
+    
+    # Version 2: centered ψ. This works with convolution mode `:center` which is non-causal add produces artefacts of radial circles.
+    return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(sqrt(2π)*1im*ω) * exp(-1im*ω/2))^(v)  # centered bspline: supported on [-v/2, v/2]
 end
 
 
@@ -557,47 +564,48 @@ end
 Evaluate the integrand function of G^ψ_{ρ}
 
 # Args
-* ω: frequency
-* v: vanishing moments
+- ω: frequency
+- v: vanishing moments
 """
 function Gfunc_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
-    #     @assert ρ>0
-    #     @assert 1>H>0
+    # @assert ρ>0 && 1>H>0
     s = √ρ
     return (ω==0) ? 0 : real(_bspline_ft(ω*s, v) * conj(_bspline_ft(ω/s, v)) / abs(ω)^(2H+1) * exp(-1im*ω*τ))
 end
 
 """
-Expanded and centered version.
-"""
-function Gfunc_bspline_integrand_expand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
-    #     @assert ρ>0
-    #     @assert 1>H>0
-    s = √ρ
-    # # Version 1: non centered ψ. This works with convolution mode `:left`` and produces artefacts of radiancy straight lines
-    # return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*v*(s-1/s)/2 - ω*τ) / abs(ω)^(2v+2H+1)
-    # Version 2: centered ψ. This works with convolution mode `:center`
-    return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*τ) / abs(ω)^(2v+2H+1)
-end
-
-"""
 Derivative w.r.t. H
 """
-function diff_Gfunc_bspline_integrand_expand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
-    s = √ρ
-    return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*τ) * (-2 * log(abs(ω))) / abs(ω)^(2v+2H+1)
+function diff_Gfunc_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
+    return Gfunc_bspline_integrand(τ, ω, ρ, H, v) * (-2 * log(abs(ω)))
 end
+
+# """
+# Expanded and centered version.
+# """
+# function Gfunc_bspline_integrand_expand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
+#     # @assert ρ>0 && 1>H>0
+#     s = √ρ
+#     # # Version 1: non centered ψ. This works with convolution mode `:left`` and produces artefacts of radiancy straight lines
+#     # return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*v*(s-1/s)/2 - ω*τ) / abs(ω)^(2v+2H+1)
+#     # Version 2: centered ψ. This works with convolution mode `:center`
+#     return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*τ) / abs(ω)^(2v+2H+1)
+# end
+
+# """
+# Derivative w.r.t. H
+# """
+# function diff_Gfunc_bspline_integrand_expand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
+#     s = √ρ
+#     return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*τ) * (-2 * log(abs(ω))) / abs(ω)^(2v+2H+1)
+# end
 
 """
 Evaluate the G^ψ_{ρ} function by numerical integration.
-
-# Args
 """
 function Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int)
-    f = ω -> Gfunc_bspline_integrand_expand(τ, ω, ρ, H, v)
-    # f = ω -> Gfunc_bspline_integrand(τ, ω, ρ, H, v)
+    f = ω -> Gfunc_bspline_integrand(τ, ω, ρ, H, v)
 
-    # return Calculus.integrate(f, -50, 50)
     # res = QuadGK.quadgk(f, -100, 100, order=10)
     res = QuadGK.quadgk(f, -50., 50.)
     return res[1]
@@ -607,7 +615,7 @@ end
 Derivative w.r.t. H
 """
 function diff_Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int)
-    f = ω -> diff_Gfunc_bspline_integrand_expand(τ, ω, ρ, H, v)
+    f = ω -> diff_Gfunc_bspline_integrand(τ, ω, ρ, H, v)
     res = QuadGK.quadgk(f, -50., 50.)
     return res[1]
 end
@@ -617,42 +625,29 @@ Evaluate G-matrix in DCWT
 
 # Notes
 - The true scale is two times the scale index due to the special implementation of B-Spline wavelet, see also `_intscale_bspline_filter()`.
-- TODO: parallelization!
+
+# TODO
+- parallelization
 """
-function Gmat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractArray)
-    # true scale is 2i hence the extra 1/2 factor
-    return [Gfunc_bspline(lag/sqrt(i*j)/2, j/i, H, v) for i in sclrng, j in sclrng]
+function Gmat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractArray{Int})
+    all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
+    return [Gfunc_bspline(lag/sqrt(i*j), j/i, H, v) for i in sclrng, j in sclrng]
 end
-
-
-#     A = zeros((length(sclrng),length(sclrng)))
-
-#     # Parallelization!
-#     for (c,i) in enumerate(sclrng)
-#         for (r,j) in enumerate(sclrng)
-#             A[r,c] = Cbspline_func(lag/sqrt(i*j), sqrt(i*j), H, v)
-#             # f(ω) = Cbspline_intfunc(lag/sqrt(i*j), ω, sqrt(i*j), H, v)
-#             # res = QuadGK.quadgk(f, -20, 20)
-#             # A[r,c] = res[1]
-#         end
-#     end
-#     return A
-# end
 
 """
 Function C^1_ρ(τ, H)
 """
-C1rho(τ::Real, ρ::Real, H::Real, vm::Int) = gamma(2H+1) * sin(π*H) * Gfunc_bspline(τ, ρ, H, vm)
+C1rho(τ::Real, ρ::Real, H::Real, v::Int) = gamma(2H+1) * sin(π*H) * Gfunc_bspline(τ, ρ, H, v)
 
 diff_gamma = x -> ForwardDiff.derivative(gamma, x)
 
 """
 Derivative w.r.t. H
 """
-function diff_C1rho(τ::Real, ρ::Real, H::Real, vm::Int)
-    d1 = 2 * diff_gamma(2H+1) * sin(π*H) * Gfunc_bspline(τ, ρ, H, vm)
-    d2 = gamma(2H+1) * cos(π*H) * π * Gfunc_bspline(τ, ρ, H, vm)
-    d3 = gamma(2H+1) * sin(π*H) * diff_Gfunc_bspline(τ, ρ, H, vm)
+function diff_C1rho(τ::Real, ρ::Real, H::Real, v::Int)
+    d1 = 2 * diff_gamma(2H+1) * sin(π*H) * Gfunc_bspline(τ, ρ, H, v)
+    d2 = gamma(2H+1) * cos(π*H) * π * Gfunc_bspline(τ, ρ, H, v)
+    d3 = gamma(2H+1) * sin(π*H) * diff_Gfunc_bspline(τ, ρ, H, v)
     return d1 + d2 + d3
 end
 

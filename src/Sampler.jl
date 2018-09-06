@@ -53,7 +53,7 @@ size(s::Sampler) = size(s.grid,)
 
 Initialize a sampler for fGn.
 
-# Arguments
+# Args
 - H: hurst exponent
 - N: number of points of the regular sampling grid
 - name: name of the sampling method: {"CHOLESKY", "CIRCULANT", "HOSKING", "MIDPOINT", "WAVELET"}
@@ -117,12 +117,12 @@ end
 
 Initialize a sampler for fBm.
 
-# Arguments
+# Args
 - H: hurst exponent
 - N: number of points of the regular sampling grid
 - name: name of the sampling method: {"CHOLESKY", "CIRCULANT", "HOSKING", "MIDPOINT", "WAVELET"}
 
-# Returns:
+# Returns
 - an object of sampler
 """
 function init_sampler_fBm(H::Float64, N::Integer, name::String)
@@ -438,7 +438,7 @@ struct CRMDSampler{P<:IncrementSSSIProcess}<:DiscreteTimeSampler{P, DiscreteTime
     """
     Constructor of CRMDSampler.
 
-    # Arguments
+    # Args
     - p: object of `IncrementSSSIProcess`.
     - g: discrete-time regular sampling grid, the step can be >= 1.
     - w: moving window size.
@@ -558,7 +558,7 @@ struct WaveletSampler<:DiscreteTimeSampler{FractionalIntegrated, DiscreteTimeReg
     """
     Constructor of WaveletSampler.
 
-    # Arguments
+    # Args
     - p: fractional integrated process, with the parameters d=H-1/2 and H the Hurst exponent
     - r: regularity of the wavelet function, must be strictly larger than s=H+1/2
     - psflag: if true generate a trajectory of FARIMA(0, H+1/2, 0), otherwise generate FARIMA(0, H-1/2, 0).
@@ -680,7 +680,7 @@ end
 
 Compute the coefficients of linear prediction for a sequence of fGn.
 
-# Arguments
+# Args
 - Hgrid: grid points of Hurst exponents
 - N: length of stationary process
 - epsilon: threshold for identical Hgrid exponents

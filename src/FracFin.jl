@@ -6,13 +6,12 @@ module FracFin
 # using PDMats
 # using StatsBase
 
+using LinearAlgebra
+
 import Base: convert, rand, length, size, show, binomial, getindex, promote_rule
 import Distributions: VariateForm, Univariate, Multivariate, ValueSupport, Discrete, Continuous, Sampleable
 import StatsBase: autocov!, autocov
-using LinearAlgebra
-
 import SpecialFunctions: gamma, lgamma
-
 import DSP: conv, fft, ifft
 
 import Wavelets
@@ -24,7 +23,7 @@ import GLM
 import QuadGK
 import Optim
 import ForwardDiff
-import Calculus
+# import Calculus
 
 """
     Exception for not implemented methods.
