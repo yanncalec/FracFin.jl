@@ -651,3 +651,72 @@ function diff_C1rho(τ::Real, ρ::Real, H::Real, v::Int)
     return d1 + d2 + d3
 end
 
+
+#### Stat ####
+
+function cov(X::AbstractVecOrMat, Y::AbstractVecOrMat, w::StatsBase.AbstractWeights)
+    # w is always a column vector, by definition of AbstractWeights
+    @assert size(X, 1) == size(Y, 1) == length(w)
+    # weighted mean
+    mX = StatsBase.mean(X, w, 1)
+    mY = StatsBase.mean(Y, w, 1)
+    return (X .- mX)' * (w .* (Y .- mY)) / sum(w)
+end
+
+
+"""
+    multi_linear_regression_colwise(Y::Matrix{Float64}, X::Matrix{Float64}, w::StatsBase.AbstractWeights)
+
+Multi-linear regression of data matrix Y versus X in the column direction, i.e. each row in Y is an observation.
+"""
+function multi_linear_regression_colwise(Y::Matrix{Float64}, X::Matrix{Float64}, w::StatsBase.AbstractWeights)
+    @assert size(Y,1)==size(X,1)==length(w)
+    
+    μy = StatsBase.mean(Y, w, 1)[:]  # do not take keyword argument `dims=1` if weight is passed.
+    μx = StatsBase.mean(X, w, 1)[:]
+    Σyx = cov(Y, X, w)  # this calls user defined cov function
+    Σxx = cov(X, X, w)
+    A::Matrix{Float64} = Σyx / Σxx  # i.e., Σyx * inv(Σxx)
+    β::Vector{Float64} = μy - A * μx
+    E = Y - (A * X' .+ β)'
+    Σ = cov(E, E, w)
+    return (A, β), E, Σ
+end
+
+function multi_linear_regression(Y::Matrix{Float64}, X::Matrix{Float64}, w::StatsBase.AbstractWeights; dims::Int=1)
+    if dims==1
+        return multi_linear_regression_colwise(Y, X, w)
+    else
+        return multi_linear_regression_colwise(Y', X', w)
+    end
+end
+
+multi_linear_regression(Y::Matrix{Float64}, X::Matrix{Float64}; dims::Int=1) = 
+    multi_linear_regression(Y, X, StatsBase.weights(ones(size(Y,1))); dims=dims)
+
+"""
+value of regularization constant
+"""
+function IRLS(Y::Matrix{Float64}, X::Matrix{Float64}, pnorm::Real=2.; maxiter::Int=10^3, tol::Float64=10^-3, vreg::Float64=1e-8)
+    @assert pnorm > 0
+    
+    wfunc = E -> (sqrt.(sum(E.*E, dims=2) .+ vreg).^(pnorm-2))[:]  # function for computing weight vector
+    (A, β), E, Σ = multi_linear_regression(Y, X)  # initialization
+    w0::Vector{Float64} =  wfunc(E) # weight vector
+    n::Int = 1
+    err::Float64 = 0.
+
+    for n=1:maxiter
+        (A, β), E, Σ = multi_linear_regression(Y, X, StatsBase.weights(w0))
+        w = wfunc(E)
+        err = norm(w - w0) / norm(w0)
+        w0 = w
+        if  err < tol
+            break
+        end
+    end
+    println(n)
+    println(err)
+    
+    return (A, β), w0, E, sum(sqrt.(sum(E.*E, dims=2)).^pnorm)
+end

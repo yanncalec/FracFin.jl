@@ -10,7 +10,6 @@ using LinearAlgebra
 
 import Base: convert, rand, length, size, show, binomial, getindex, promote_rule
 import Distributions: VariateForm, Univariate, Multivariate, ValueSupport, Discrete, Continuous, Sampleable
-import StatsBase: autocov!, autocov
 import SpecialFunctions: gamma, lgamma
 import DSP: conv, fft, ifft
 
@@ -23,6 +22,10 @@ import GLM
 import QuadGK
 import Optim
 import ForwardDiff
+
+import StatsBase
+import StatsBase: autocov!, autocov
+
 # import Calculus
 
 """
