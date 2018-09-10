@@ -134,18 +134,26 @@ end
     scalogram_estim(C::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, ρ::Int=1)
 
 Scalogram estimator for Hurst exponent and volatility.
-"""
-function scalogram_estim(C::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, ρ::Int=1)
-    @assert size(C,1) == size(C,2) == length(sclrng)
 
-    toto = [C[j, ρ*j] for j in 1:size(C,1) if ρ*j<=size(C,1)]
-    yvar = abs.(toto)
+# Args
+- X: matrix of wavelet coefficients. Each column corresponds to one scale.
+- sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one column in the matrix X
+- v: vanishing moments
+- ρ: integer ratio defining an oblique diagonal (i, ρi), e.g. ρ=1 corresponds to the main diagonal.
+"""
+function scalogram_estim(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, ρ::Int=1)
+    @assert size(X,2) == length(sclrng)
+
+    Σ = StatsBase.cov(X, X, dims=1, corrected=true)  # covariance matrix
+
+    yvar = [Σ[j, ρ*j] for j in 1:size(Σ,1) if ρ*j<=size(Σ,1)]
     df = DataFrames.DataFrame(
-        X=log.(sclrng[1:length(toto)]),
-        Y=log.(abs.(toto))
+        X=log.(sclrng[1:length(yvar)]),
+        Y=log.(abs.(yvar))
     )
     ols = GLM.lm(@GLM.formula(Y~X), df)
     coef = GLM.coef(ols)
+
     hurst_estim = (coef[2]-1)/2
     C2 = C1rho(0, ρ, hurst_estim, v)
     σ_estim = ℯ^((coef[1] - log(abs(C2)) - (hurst_estim+1/2)*log(ρ))/2)
@@ -153,22 +161,51 @@ function scalogram_estim(C::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int,
     return (hurst_estim, σ_estim), ols, df
 end
 
+# function scalogram_estim(X::AbstractVector{T}, sclrng::AbstractArray{Int}, v::Int, ρ::Int=1) where T
+#     Xm::Matrix{Float64} = hcat(X...)'
+#     return scalogram_estim(Xm, sclrng, v, ρ)
+# end
+
+# function rolling_estim(fun::Function, X::AbstractVector{T}, wsize::Int, p::Int=1) where T
+#     offset = wsize-1
+#     res = [fun(view(X, (n*p):(n*p+wsize-1))) for n=1:p:N]
+#     end
+
+#     # y = fun(view(X, idx:idx+offset))  # test return type of fun
+#     res = Vector{typeof(y)}(undef, div(length(data)-offset, p))
+#     @inbounds for n=1:p:N
+#         push!(res, fun(view(X, (idx*p):(idx*p+offset))))
+#         end
+#     @inbounds for n in eachindex(res)
+#         res[n] = fun(hcat(X[idx*p:idx*p+offset]...))
+#     end
+
+#     return res
+# end
+
+
 ##### MLE #####
 
 
 
 ##### Wavelet-MLE #####
 
-function Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray, vm::Int, H::Real, s::Real)
+"""
+    Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real, s::Real)
+
+# Args
+- X: each row is an observation
+"""
+function Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real, s::Real)
     N, d = size(X)  # length and dim of X
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
-    C1 = [C1rho(0, j/i, H, vm) for i in sclrng, j in sclrng]
-    Σ = s * C1 .* A
+    C1 = [C1rho(0, j/i, H, v) for i in sclrng, j in sclrng]
+    Σ = s^2 * C1 .* A
     iX = Σ \ X'
-    return -1/2 * (trace(X*iX) + N*log(abs(det(Σ))) + N*d*log(2π))
+    return -1/2 * (tr(X*iX) + N*log(abs(det(Σ))) + N*d*log(2π))
 end
 
-function grad_Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray, vm::Int, H::Real, s::Real)
+function grad_Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, vm::Int, H::Real, s::Real)
     N, d = size(X)  # length and dim of X
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
     dAda = [log(i*j) for i in sclrng, j in sclrng] .* A
@@ -181,8 +218,8 @@ function grad_Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray, vm::Int
     dΣdb = 2s * C1 .* A
 
     iX = Σ \ X'
-    da = N * trace(Σ \ dΣda) - trace(iX' * dΣda * iX)
-    db = N * trace(Σ \ dΣdb) - trace(iX' * dΣdb * iX)
+    da = N * tr(Σ \ dΣda) - tr(iX' * dΣda * iX)
+    db = N * tr(Σ \ dΣdb) - tr(iX' * dΣdb * iX)
 
     return  -1/2 * [da, db]
 end
@@ -191,18 +228,21 @@ end
 C1sgm(α::Real, ρ::Real, vm::Int) = C1rho(0, ρ, sigmoid(α), vm)
 diff_C1sgm(α::Real, ρ::Real, vm::Int) = diff_C1rho(0, ρ, sigmoid(α), vm) * diff_sigmoid(α)
 
-function Wavelet_MLE_obj_sgm(X::Matrix{Float64}, sclrng::AbstractArray, vm::Int, α::Real, β::Real)
+function Wavelet_MLE_obj_sgm(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, α::Real, β::Real)
     N, d = size(X)  # length and dim of X
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2*sigmoid(α)+1)
-    C1 = [C1sgm(α, j/i, vm) for i in sclrng, j in sclrng]
+    C1 = [C1sgm(α, j/i, v) for i in sclrng, j in sclrng]
     Σ = exp(2β) * C1 .* A
+    println(α)
+    println(C1)
+    println(det(Σ))
     iX = Σ \ X'
 #     iΣ = pinv(Σ)  # regularization by pseudo-inverse
 #     iX = iΣ * X'
-    return -1/2 * (trace(X*iX) + N*log(abs(det(Σ))) + N*d*log(2π))
+    return -1/2 * (tr(X*iX) + N*log(abs(det(Σ))) + N*d*log(2π))
 end
 
-function grad_Wavelet_MLE_obj_sgm(X::Matrix{Float64}, sclrng::AbstractArray, vm::Int, α::Real, β::Real)
+function grad_Wavelet_MLE_obj_sgm(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, α::Real, β::Real)
     N, d = size(X)  # length and dim of X
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2*sigmoid(α)+1)
     dAda = diff_sigmoid(α) * [log(i*j) for i in sclrng, j in sclrng] .* A
@@ -211,15 +251,15 @@ function grad_Wavelet_MLE_obj_sgm(X::Matrix{Float64}, sclrng::AbstractArray, vm:
 #     dC1da = zeros(C1)
 #     for (r,i) in enumerate(sclrng)
 #         for (c,j) in enumerate(sclrng)
-#             C1sgm_ij = a -> C1sgm(a, j/i, vm)
+#             C1sgm_ij = a -> C1sgm(a, j/i, v)
 #             diff_C1sgm_ij = x -> ForwardDiff.derivative(C1sgm_ij, x)
 #             C1[r,c] = C1sgm_ij(α)
 #             dC1da[r,c] = diff_C1sgm_ij(α)
 #         end
 #     end
 
-    C1 = [C1sgm(α, j/i, vm) for i in sclrng, j in sclrng]
-    dC1da = [diff_C1sgm(α, j/i, vm) for i in sclrng, j in sclrng]
+    C1 = [C1sgm(α, j/i, v) for i in sclrng, j in sclrng]
+    dC1da = [diff_C1sgm(α, j/i, v) for i in sclrng, j in sclrng]
 
     Σ = exp(2β) * C1 .* A
 #     Σ += eye(Σ) * 1e-8
@@ -228,12 +268,12 @@ function grad_Wavelet_MLE_obj_sgm(X::Matrix{Float64}, sclrng::AbstractArray, vm:
 
 #     iΣ = pinv(Σ)  # regularization by pseudo-inverse
 #     iX = iΣ * X'
-#     da = N * trace(iΣ * dΣda) - trace(iX' * dΣda * iX)
-#     db = N * trace(iΣ * dΣdb) - trace(iX' * dΣdb * iX)
+#     da = N * tr(iΣ * dΣda) - tr(iX' * dΣda * iX)
+#     db = N * tr(iΣ * dΣdb) - tr(iX' * dΣdb * iX)
 
     iX = Σ \ X'
-    da = N * trace(Σ \ dΣda) - trace(iX' * dΣda * iX)
-    db = N * trace(Σ \ dΣdb) - trace(iX' * dΣdb * iX)
+    da = N * tr(Σ \ dΣda) - tr(iX' * dΣda * iX)
+    db = N * tr(Σ \ dΣdb) - tr(iX' * dΣdb * iX)
 
     return  -1/2 * [da, db]
 end
