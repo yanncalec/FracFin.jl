@@ -7,6 +7,7 @@ module FracFin
 # using StatsBase
 
 using LinearAlgebra
+# using Statistics
 
 import Base: convert, rand, length, size, show, binomial, getindex, promote_rule
 import Distributions: VariateForm, Univariate, Multivariate, ValueSupport, Discrete, Continuous, Sampleable

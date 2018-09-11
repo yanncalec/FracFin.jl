@@ -233,8 +233,8 @@ function Wavelet_MLE_obj_sgm(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2*sigmoid(α)+1)
     C1 = [C1sgm(α, j/i, v) for i in sclrng, j in sclrng]
     Σ = exp(2β) * C1 .* A
-    println(α)
-    println(C1)
+    println("α=$α, β=$β")
+    println("C1=$C1")
     println(det(Σ))
     iX = Σ \ X'
 #     iΣ = pinv(Σ)  # regularization by pseudo-inverse

@@ -571,13 +571,22 @@ function Gfunc_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
     # @assert ρ>0 && 1>H>0
     s = √ρ
     return (ω==0) ? 0 : real(_bspline_ft(ω*s, v) * conj(_bspline_ft(ω/s, v)) / abs(ω)^(2H+1) * exp(-1im*ω*τ))
+
+end
+
+function Gfunc_bspline_integrand_expand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
+    # @assert ρ>0 && 1>H>0
+    s = √ρ
+    # return 1/16^v/2π * (ω^2)^(v-(H+1/2)) * (sinc((ω*s)/4π)*sinc((ω/s)/4π))^(2v) * exp(-1im*ω*τ) * exp(1im*ω*v/2*(s-1/s))  # :left
+    # return 1/16^v/2π * (ω^2)^(v-(H+1/2)) * (sinc((ω*s)/4π)*sinc((ω/s)/4π))^(2v) * exp(-1im*ω*τ) # :center
+    return 1/16^v/2π * (ω^2)^(v-(H+1/2)) * (sinc((ω*s)/4π)*sinc((ω/s)/4π))^(2v) * cos(ω*τ) # :center
 end
 
 """
 Derivative w.r.t. H
 """
 function diff_Gfunc_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
-    return Gfunc_bspline_integrand(τ, ω, ρ, H, v) * (-2 * log(abs(ω)))
+    return (ω==0) ? 0 : Gfunc_bspline_integrand(τ, ω, ρ, H, v) * (-2 * log(abs(ω)))
 end
 
 # """
@@ -603,20 +612,22 @@ end
 """
 Evaluate the G^ψ_{ρ} function by numerical integration.
 """
-function Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int)
-    f = ω -> Gfunc_bspline_integrand(τ, ω, ρ, H, v)
-
+function Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int; rng::Tuple{Real, Real}=(-10, 10))
+    # f = ω -> Gfunc_bspline_integrand(τ, ω, ρ, H, v)
+    println("τ=$τ, ρ=$ρ, H=$H, v=$v")
+    f = ω -> Gfunc_bspline_integrand_expand(τ, ω, ρ, H, v)
+    
     # res = QuadGK.quadgk(f, -100, 100, order=10)
-    res = QuadGK.quadgk(f, -50., 50.)
+    res = QuadGK.quadgk(f, rng...)
     return res[1]
 end
 
 """
 Derivative w.r.t. H
 """
-function diff_Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int)
+function diff_Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int; rng::Tuple{Real, Real}=(-10, 10))
     f = ω -> diff_Gfunc_bspline_integrand(τ, ω, ρ, H, v)
-    res = QuadGK.quadgk(f, -50., 50.)
+    res = QuadGK.quadgk(f, rng...)
     return res[1]
 end
 
