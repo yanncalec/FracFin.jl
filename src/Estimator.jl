@@ -196,16 +196,19 @@ end
 # Args
 - X: each row is an observation
 """
-function Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real, s::Real)
+function Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real, σ::Real)
     N, d = size(X)  # length and dim of X
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
     C1 = [C1rho(0, j/i, H, v) for i in sclrng, j in sclrng]
-    Σ = s^2 * C1 .* A
+    Σ = σ^2 * C1 .* A
+    # println("H=$H, σ=$σ")
+    # println("C1=$C1")
+    # println(det(Σ))
     iX = Σ \ X'
     return -1/2 * (tr(X*iX) + N*log(abs(det(Σ))) + N*d*log(2π))
 end
 
-function grad_Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, vm::Int, H::Real, s::Real)
+function grad_Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, vm::Int, H::Real, σ::Real)
     N, d = size(X)  # length and dim of X
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
     dAda = [log(i*j) for i in sclrng, j in sclrng] .* A
@@ -213,9 +216,9 @@ function grad_Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, vm
     C1 = [C1rho(0, j/i, H, vm) for i in sclrng, j in sclrng]
     dC1da = [diff_C1rho(0, j/i, H, vm) for i in sclrng, j in sclrng]
 
-    Σ = s^2 * C1 .* A
-    dΣda = s^2 * (dC1da .* A + C1 .* dAda)
-    dΣdb = 2s * C1 .* A
+    Σ = σ^2 * C1 .* A
+    dΣda = σ^2 * (dC1da .* A + C1 .* dAda)
+    dΣdb = 2σ * C1 .* A
 
     iX = Σ \ X'
     da = N * tr(Σ \ dΣda) - tr(iX' * dΣda * iX)
