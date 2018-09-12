@@ -38,10 +38,12 @@ struct RegularGrid{T} <: SamplingGrid{T}
     """
     Inner constructor.
     """
-    function RegularGrid{T}(start::T, step::T, stop::T) where T
+    function RegularGrid{T}(start::T, step::T, stop::T, len::Integer=NaN) where T
         @assert step > 0
         @assert start <= stop
-        len = Integer(div(stop + step - start, step))
+        if isnan(len)
+            len = Integer(div(stop + step - start, step))
+        end
         new(start, step, stop, len)
     end
 
@@ -49,7 +51,7 @@ struct RegularGrid{T} <: SamplingGrid{T}
     Inner constructor from `AbstractRange` type.
     """
     function RegularGrid{T}(g::AbstractRange) where T
-        RegularGrid{T}(T(g[1]), T(g[2]-g[1]), T(g[end]))
+        RegularGrid{T}(T(g[1]), T(g[2]-g[1]), T(g[end]), length(g))  # <- dirty workaround
     end
 end
 
@@ -68,7 +70,7 @@ function RegularGrid(g::AbstractRange)
     # step = T(g[2]-g[1])
     # step = typeof(g)<:Union{StepRangeLen, StepRange} ? T(g.step) : T(1)
     # RegularGrid(T(g[1]), T(step), T(g[end]))
-    RegularGrid(g[1], g[2]-g[1], g[end])
+    RegularGrid(g[1], g[2]-g[1], g[end], length(g))
 end
 
 const DiscreteTimeRegularGrid = RegularGrid{DiscreteTime}

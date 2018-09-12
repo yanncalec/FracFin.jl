@@ -25,7 +25,7 @@ import Optim
 import ForwardDiff
 
 import StatsBase
-import StatsBase: autocov!, autocov
+import StatsBase: autocov!, autocov, mean, cov
 
 # import Calculus
 

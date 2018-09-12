@@ -203,7 +203,7 @@ struct CholeskySampler{T, P, G}<:Sampler{T, P, G}
         end
         # construct the auto-covariance matrix
         cmat = autocov(p, g)
-        lmat = chol(cmat)'  # cholesky decomposition yields an upper-triangular matrix
+        lmat = (cholesky(cmat)).U'  # cholesky decomposition yields an upper-triangular matrix
         return new(p, g, cmat, lmat)
     end
 end

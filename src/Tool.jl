@@ -551,86 +551,82 @@ Evaluate the Fourier transform of B-Spline wavelet.
 function _bspline_ft(ω::Real, v::Int)
 #     @assert v>0  # check vanishing moment   
 
-    # # Version 1: non centered ψ. This works with convolution mode `:left`` and produces artefacts of radiancy straight lines.
-    # return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(sqrt(2π)*1im*ω))^(v)  # non-centered bspline: supported on [0, v]
+    # Version 1: non centered ψ. This works with convolution mode `:left`` and produces artefacts of radiancy straight lines.
+    return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(sqrt(2π)*1im*ω))^(v)  # non-centered bspline: supported on [0, v]
     
-    # Version 2: centered ψ. This works with convolution mode `:center` which is non-causal add produces artefacts of radial circles.
-    return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(sqrt(2π)*1im*ω) * exp(-1im*ω/2))^(v)  # centered bspline: supported on [-v/2, v/2]
+    # # Version 2: centered ψ. This works with convolution mode `:center` which is non-causal add produces artefacts of radial circles.
+    # return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(sqrt(2π)*1im*ω) * exp(-1im*ω/2))^(v)  # centered bspline: supported on [-v/2, v/2]
 end
 
 
 #### mBm wavelet analysis ####
+
 """
-Evaluate the integrand function of G^ψ_{ρ}
+The integrand function of G^ψ_ρ(τ, H) with a centered B-spline wavelet.
+"""
+function Gfunc_bspline_integrand_center(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
+    return 1/16^v * 1/2π * (ω^2)^(v-(H+1/2)) * (sinc(ω*√ρ/4π)*sinc(ω/√ρ/4π))^(2v) * cos(ω*τ)
+end
+
+"""
+Evaluate the integrand function of G^ψ_ρ(τ, H)
 
 # Args
-- ω: frequency
-- v: vanishing moments
-"""
-function Gfunc_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
-    # @assert ρ>0 && 1>H>0
-    s = √ρ
-    return (ω==0) ? 0 : real(_bspline_ft(ω*s, v) * conj(_bspline_ft(ω/s, v)) / abs(ω)^(2H+1) * exp(-1im*ω*τ))
+- τ, ω, ρ, H: see definition of G^ψ_ρ(τ, H).
+- v: vanishing moments of the Bspline wavelet ψ, e.g. v=1 for Haar wavelet.
 
+# Note
+- We use the fact that G^ψ_ρ(τ, H) is a real function to simplify the implementation.
+- In Julia the sinc function is defined as `sinc(x)=sin(πx)/(πx)`.
+"""
+function Gfunc_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int, mode::Symbol)
+    # @assert ρ>0 && 1>H>0 && v>0
+    
+    # The integrand is, by definition 
+    # _bspline_ft(ω*√ρ, v) * conj(_bspline_ft(ω/√ρ, v)) / abs(ω)^(2H+1) * exp(-1im*ω*τ)
+    # this should be modulated by 
+    # exp(1im*ω*v*(√ρ-1/√ρ)/2), if the convolution mode is :left, i.e. causal
+    # or exp(-1im*ω*v*(√ρ-1/√ρ)/2), if the convolution mode is :right, i.e. anti-causal
+    # However, such implementation is numerically unstable due to singularities. We rewrite the function in an equivalent form using the sinc function which is numerically stable.
+    if mode == :center
+        return Gfunc_bspline_integrand_center(τ, ω, ρ, H, v)
+    elseif mode == :left
+        return Gfunc_bspline_integrand_center(τ-v*(√ρ-1/√ρ)/2, ω, ρ, H, v)
+    elseif mode == :right
+        return Gfunc_bspline_integrand_center(τ+v*(√ρ-1/√ρ)/2, ω, ρ, H, v)
+    else
+        throw(UndefRefError("Unknown mode: $(mode)"))
+    end
 end
 
-function Gfunc_bspline_integrand_expand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
-    # @assert ρ>0 && 1>H>0
-    s = √ρ
-    # return 1/16^v * 1/2π * (ω^2)^(v-(H+1/2)) * (sinc((ω*s)/4π)*sinc((ω/s)/4π))^(2v) * exp(1im*ω*v*(s-1/s)/2)  # :left
-    return 1/16^v * 1/2π * (ω^2)^(v-(H+1/2)) * (sinc(ω*s/4π)*sinc(ω/s/4π))^(2v)  # :center
-end
-
 """
-Derivative w.r.t. H
+Evaluate the function G^ψ_ρ(τ,H) by numerical integration.
 """
-function diff_Gfunc_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
-    return (ω==0) ? 0 : (-log(ω^2) * Gfunc_bspline_integrand(τ, ω, ρ, H, v))
-end
-
-# """
-# Expanded and centered version.
-# """
-# function Gfunc_bspline_integrand_expand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
-#     # @assert ρ>0 && 1>H>0
-#     s = √ρ
-#     # # Version 1: non centered ψ. This works with convolution mode `:left`` and produces artefacts of radiancy straight lines
-#     # return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*v*(s-1/s)/2 - ω*τ) / abs(ω)^(2v+2H+1)
-#     # Version 2: centered ψ. This works with convolution mode `:center`
-#     return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*τ) / abs(ω)^(2v+2H+1)
-# end
-
-# """
-# Derivative w.r.t. H
-# """
-# function diff_Gfunc_bspline_integrand_expand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
-#     s = √ρ
-#     return (ω==0) ? 0 : (2π)^(v-1) * 2^v * (1-cos(ω*s/2))^v * (1-cos(ω/s/2))^v * cos(ω*τ) * (-2 * log(abs(ω))) / abs(ω)^(2v+2H+1)
-# end
-
-"""
-Evaluate the G^ψ_{ρ} function by numerical integration.
-"""
-function Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int; rng::Tuple{Real, Real}=(-50, 50))
-    # f = ω -> Gfunc_bspline_integrand(τ, ω, ρ, H, v)
+function Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
+    f = ω -> Gfunc_bspline_integrand(τ, ω, ρ, H, v, mode)
     # println("τ=$τ, ρ=$ρ, H=$H, v=$v") # 
-    f = ω -> real(Gfunc_bspline_integrand_expand(τ, ω, ρ, H, v) * exp(1im*ω*τ))
 
-    # dh = 1e-3
-    # return dh*sum(f.(rng[1]:dh:rng[2]))
-
-    # res = QuadGK.quadgk(f, -100, 100, order=10)
-    res = QuadGK.quadgk(f, rng...)
-    return res[1]
+    res = try
+        # QuadGK.quadgk(f, -100, 100, order=10)[1]
+        QuadGK.quadgk(f, rng...)[1]
+    catch
+        1e-3 * sum(f.(rng[1]:1e-3:rng[2]))
+    end
+    return res
 end
 
 """
 Derivative w.r.t. H
 """
-function diff_Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int; rng::Tuple{Real, Real}=(-10, 10))
-    f = ω -> diff_Gfunc_bspline_integrand(τ, ω, ρ, H, v)
-    res = QuadGK.quadgk(f, rng...)
-    return res[1]
+function diff_Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
+    f = ω -> ((ω==0) ? 0 : (-log(ω^2) * Gfunc_bspline_integrand(τ, ω, ρ, H, v, mode)))
+    res = try
+        # QuadGK.quadgk(f, -100, 100, order=10)[1]
+        QuadGK.quadgk(f, rng...)[1]
+    catch
+        1e-3 * sum(f.(rng[1]:1e-3:rng[2]))
+    end
+    return res
 end
 
 """
@@ -642,37 +638,43 @@ Evaluate G-matrix in DCWT
 # TODO
 - parallelization
 """
-function Gmat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractArray{Int})
+function Gmat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractArray{Int}, mode::Symbol)
     all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
-    return [Gfunc_bspline(lag/sqrt(i*j), j/i, H, v) for i in sclrng, j in sclrng]
+    return [Gfunc_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
 end
 
 """
 Function C^1_ρ(τ, H)
+
+# Args
+- τ, ρ, H: see definition
+- v: vanishing moments of the wavelet ψ
+- mode: {:left, :center, :right} for causal, centered, anti-causal ψ
 """
-C1rho(τ::Real, ρ::Real, H::Real, v::Int) = gamma(2H+1) * sin(π*H) * Gfunc_bspline(τ, ρ, H, v)
+C1rho(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol) = gamma(2H+1) * sin(π*H) * Gfunc_bspline(τ, ρ, H, v, mode)
 
 diff_gamma = x -> ForwardDiff.derivative(gamma, x)
 
 """
 Derivative w.r.t. H
 """
-function diff_C1rho(τ::Real, ρ::Real, H::Real, v::Int)
-    d1 = 2 * diff_gamma(2H+1) * sin(π*H) * Gfunc_bspline(τ, ρ, H, v)
-    d2 = gamma(2H+1) * cos(π*H) * π * Gfunc_bspline(τ, ρ, H, v)
-    d3 = gamma(2H+1) * sin(π*H) * diff_Gfunc_bspline(τ, ρ, H, v)
+function diff_C1rho(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol)
+    d1 = 2 * diff_gamma(2H+1) * sin(π*H) * Gfunc_bspline(τ, ρ, H, v, mode)
+    d2 = gamma(2H+1) * cos(π*H) * π * Gfunc_bspline(τ, ρ, H, v, mode)
+    # d3 = gamma(2H+1) * sin(π*H) * ForwardDiff.derivative(H->Gfunc_bspline(τ, ρ, H, v, mode), H)
+    d3 = gamma(2H+1) * sin(π*H) * diff_Gfunc_bspline(τ, ρ, H, v, mode)
     return d1 + d2 + d3
 end
 
 
-#### Stat ####
+#### Statistics ####
 
 function cov(X::AbstractVecOrMat, Y::AbstractVecOrMat, w::StatsBase.AbstractWeights)
     # w is always a column vector, by definition of AbstractWeights
     @assert size(X, 1) == size(Y, 1) == length(w)
     # weighted mean
-    mX = StatsBase.mean(X, w, 1)
-    mY = StatsBase.mean(Y, w, 1)
+    mX = mean(X, w, 1)
+    mY = mean(Y, w, 1)
     return (X .- mX)' * (w .* (Y .- mY)) / sum(w)
 end
 
@@ -685,8 +687,8 @@ Multi-linear regression of data matrix Y versus X in the column direction, i.e. 
 function multi_linear_regression_colwise(Y::Matrix{Float64}, X::Matrix{Float64}, w::StatsBase.AbstractWeights)
     @assert size(Y,1)==size(X,1)==length(w)
     
-    μy = StatsBase.mean(Y, w, 1)[:]  # do not take keyword argument `dims=1` if weight is passed.
-    μx = StatsBase.mean(X, w, 1)[:]
+    μy = mean(Y, w, 1)[:]  # do not take keyword argument `dims=1` if weight is passed.
+    μx = mean(X, w, 1)[:]
     Σyx = cov(Y, X, w)  # this calls user defined cov function
     Σxx = cov(X, X, w)
     A::Matrix{Float64} = Σyx / Σxx  # i.e., Σyx * inv(Σxx)

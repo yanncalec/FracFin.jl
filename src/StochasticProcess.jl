@@ -118,7 +118,7 @@ end
 
 Return the auto-covarince matrix of a stochastic process on a sampling grid.
 """
-autocov(X::StochasticProcess{T}, G::SamplingGrid{<:T}) where T = autocov!(Matrix{Float64}(length(G),length(G)), X, G)
+autocov(X::StochasticProcess{T}, G::SamplingGrid{<:T}) where T = autocov!(Matrix{Float64}(undef, length(G),length(G)), X, G)
 # autocov(X::StationaryProcess, G::SamplingGrid) = autocov!(Matrix{Float64}(length(G), length(G)), X, G)
 
 """
