@@ -1,4 +1,63 @@
 
+# function scalogram_estim(Cxx::Matrix{Float64}, sclrng::AbstractArray{Int}, ρmax::Int=1)
+#     nr, nc = size(Cxx)
+#     @assert nr == nc == length(sclrng)
+#     @assert ρmax >= 1
+#     xvar = Float64[]
+#     yvar = Float64[]
+#     for ρ=1:ρmax
+#         toto = [Cxx[j, ρ*j] for j in 1:nr if ρ*j<=nr]
+#         xvar = vcat(xvar, sclrng[1:length(toto)])
+#         yvar = vcat(yvar, abs.(toto))
+#     end
+#     df = DataFrames.DataFrame(
+#         xvar=log2.(xvar),
+#         yvar=log2.(yvar)
+#     )
+#     ols_hurst = GLM.lm(@GLM.formula(yvar~xvar), df)
+#     hurst_estim = (GLM.coef(ols_hurst)[2]-1)/2    
+#     return hurst_estim, ols_hurst
+# end
+
+
+function powlaw_estim_old(X::Vector{Float64}, lags::AbstractArray{Int}, pows::AbstractArray{T}) where {T<:Real}
+    # Define the function for computing the p-th moment of the increment
+    moment_incr(X,d,p) = mean((abs.(X[d+1:end] - X[1:end-d])).^p)
+
+    # Estimation of Hurst exponent
+    Y = zeros(Float64, (length(lags), length(pows)))
+    for (n,p) in enumerate(pows)
+        Y[:,n] = map(d -> log(moment_incr(X, d, p)), lags)
+    end
+    dY = diff(Y, 1)
+    df = DataFrames.DataFrame(xvar=(diff(log.(lags)) * pows')[:],
+                              yvar=dY[:])
+    ols_hurst = GLM.lm(@GLM.formula(yvar ~ xvar), df)
+    Hurst = GLM.coef(ols_hurst)[2]  # estimation of hurst exponent
+
+    # Estimation of volatility
+    # Constant in the p-th moment of normal distribution, see
+    # https://en.wikipedia.org/wiki/Normal_distribution#Moments
+    cps = [2^(p/2) * gamma((p+1)/2)/sqrt(pi) for p in pows]
+    Z = Y -  Hurst * (log.(lags) * pows') - ones(lags) * log.(cps)'
+    dg = DataFrames.DataFrame(xvar=(ones(lags) * pows')[:],
+                              yvar=Z[:])
+    ols_sigma = GLM.lm(@GLM.formula(yvar ~ xvar), dg)
+
+    return Y, Dict('H'=>ols_hurst, 'σ'=>ols_sigma)
+end
+
+"""
+Extract the estimates of Hurst and voaltility from the result of `powlaw_estim`.
+"""
+function powlaw_coeff(ols::Dict, h::Float64)
+    H = GLM.coef(ols['H'])[2]
+    σ = exp(GLM.coef(ols['σ'])[2] - H * log(h))
+
+    return H, σ
+end
+
+
 ##### Special functions #####
 
 """
@@ -99,4 +158,61 @@ Lower incomplete gamma function $\gamma(s,z)$ with complex arguments.
 """
 function ligamma(s::Number, z::Number; N=100, epsilon=1e-20)
     return gamma(s) - uigamma(s, z; N=N, epsilon=epsilon)
+end
+
+
+
+function wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real, σ::Real; mode::Symbol=:center)
+    N, d = size(X)  # length and dim of X
+    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+    C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
+    
+    Σ = σ^2 * C1 .* A
+    # Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
+    # println("H=$H, σ=$σ, det(Σ)=$(det(Σ))")
+
+    # method 1:
+    # iX = Σ \ X'  # <- unstable!
+    
+    # method 2:
+    # iΣ = pinv(Σ)  # regularization by pseudo-inverse
+    # iX = iΣ * X'
+
+    # method 3:
+    iX = lsqr(Σ, X')
+    
+    return -1/2 * (tr(X*iX) + N*logdet(Σ) + N*d*log(2π))
+end
+
+
+function grad_wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real, σ::Real; mode::Symbol=:center)
+    N, d = size(X)  # length and dim of X
+    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+    C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
+    dAda = [log(i*j) for i in sclrng, j in sclrng] .* A
+    dC1da = [diff_C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
+
+    Σ = σ^2 * C1 .* A
+    # Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
+
+    dΣda = σ^2 * (dC1da .* A + C1 .* dAda)
+    dΣdb = 2σ * C1 .* A
+
+    # method 1:
+    # iX = Σ \ X'
+    # da = N * tr(Σ \ dΣda) - tr(iX' * dΣda * iX)
+    # db = N * tr(Σ \ dΣdb) - tr(iX' * dΣdb * iX)
+
+    # method 2:
+    # iΣ = pinv(Σ)  # regularization by pseudo-inverse
+    # iX = iΣ * X'
+    # da = N * tr(iΣ * dΣda) - tr(iX' * dΣda * iX)
+    # db = N * tr(iΣ * dΣdb) - tr(iX' * dΣdb * iX)
+
+    # method 3:
+    iX = lsqr(Σ, X')
+    da = N * tr(lsqr(Σ, dΣda)) - tr(iX' * dΣda * iX)
+    db = N * tr(lsqr(Σ, dΣdb)) - tr(iX' * dΣdb * iX)
+
+    return  -1/2 * [da, db]
 end

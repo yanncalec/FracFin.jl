@@ -27,6 +27,11 @@ import ForwardDiff
 import StatsBase
 import StatsBase: autocov!, autocov, mean, cov
 
+import LinearAlgebra: norm
+
+import IterativeSolvers
+import IterativeSolvers: lsqr
+
 # import Calculus
 
 """

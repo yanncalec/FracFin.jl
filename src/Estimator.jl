@@ -1,50 +1,22 @@
 # Estimators for fractional processes.
 
 """
-Estimate the Hurst exponent and the volatility using power law method.
-
-# Notations
-For a continuous-time process X, let Δ_δ(X)(t) = X(t+δ) - X(t) be the increment process of step δ.
-The observation we have is a discrete-time process (time series) with the sampling step h.
-
-# Detail of the method
-The expectation of the p-th moment of a fBm is
-    E(|Δ_δ (X)|^p) = c_p * σ^p * δ^(pH),
-with c_p being a constant depending only on p.
-
-## Step 1: Estimation of Hurst exponent
-For each p in `pows` we can compute the vector
-    Y = [log(E(|Δ_(d*h) (X)|^p) for d in lags]
-using the previous formula with δ = d*h. Note that Δ_(d*h) (X) here is just the d-lag difference of X.
-Moreover, it holds
-    diff(Y) = p * diff(log(lags)) * H
-i.e. after derivative the term log(c_p * σ^p * h^(pH)) is removed from Y. Therefore one can use an
-OLS to regress
-    dY = diff(Y) against dX = p*diff(log(lags))
-which gives estimation of the Hurst exponent. Actually a single OLS is applied by concatenating
-all dY (and dX) of different p together.
-
-## Step 2: Estimation of volatility
-With the estimated H, we compute first the vector
-    Z = Y - [p*H * log(d) - log(c_p) for d in lags]
-which equals to p * log(σ * h^H), then using again an OLS to regress Z against p gives
-log(σ * h^H), from which we can compute the estimation σ if h is provided. Actually a single OLS is
-applied in a similar way as above.
+Power-law estimator for Hurst exponent and volatility.
 
 # Args
-* X: sample path
-* lags: array of the increment step
-* pows: array of positive power
+- X: sample path
+- lags: array of the increment step
+- pows: array of positive power
 
 # Returns
-* Y: a matrix that n-th column is the vector [log(E(|Δ_d(X)|^pows[n])) for d in lags]
-* ols: a dictionary of GLM objects, ols['h'] is the OLS for Hurst exponent and ols['σ'] is the OLS for log(σ * h^H)
+- Y: a matrix that n-th column is the vector [log(E(|Δ_d(X)|^pows[n])) for d in lags]
+- ols: a dictionary of GLM objects, ols['h'] is the OLS for Hurst exponent and ols['σ'] is the OLS for log(σ * h^H)
 
 # Notes
 The intercepts in both OLS are supposed to be zero. To extract the estimation of H and σ, use
 the function `powlaw_coeff`.
 """
-function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, pows::AbstractArray{T}; splstep::Real=1.) where {T<:Real}
+function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, pows::AbstractArray{T}=[2.]) where {T<:Real}
     # Define the function for computing the p-th moment of the increment
     moment_incr(X,d,p) = mean((abs.(X[d+1:end] - X[1:end-d])).^p)
 
@@ -52,6 +24,7 @@ function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, pows::Abstra
     H = zeros(Float64, length(pows))
     β = zeros(Float64, length(pows))
     C = zeros(Float64, length(pows))
+
     for (n,p) in enumerate(pows)
         C[n] = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
 
@@ -65,70 +38,12 @@ function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, pows::Abstra
         # β[n], H[n] = GLM.coef(ols)
     end
 
-    Σ = (splstep.^(-H)) .* exp.((β-log.(C))./pows)
+    Σ = exp.((β-log.(C))./pows)
     return mean(H), mean(Σ)
 end
 
 
-function powlaw_estim_old(X::Vector{Float64}, lags::AbstractArray{Int}, pows::AbstractArray{T}) where {T<:Real}
-    # Define the function for computing the p-th moment of the increment
-    moment_incr(X,d,p) = mean((abs.(X[d+1:end] - X[1:end-d])).^p)
-
-    # Estimation of Hurst exponent
-    Y = zeros(Float64, (length(lags), length(pows)))
-    for (n,p) in enumerate(pows)
-        Y[:,n] = map(d -> log(moment_incr(X, d, p)), lags)
-    end
-    dY = diff(Y, 1)
-    df = DataFrames.DataFrame(xvar=(diff(log.(lags)) * pows')[:],
-                              yvar=dY[:])
-    ols_hurst = GLM.lm(@GLM.formula(yvar ~ xvar), df)
-    Hurst = GLM.coef(ols_hurst)[2]  # estimation of hurst exponent
-
-    # Estimation of volatility
-    # Constant in the p-th moment of normal distribution, see
-    # https://en.wikipedia.org/wiki/Normal_distribution#Moments
-    cps = [2^(p/2) * gamma((p+1)/2)/sqrt(pi) for p in pows]
-    Z = Y -  Hurst * (log.(lags) * pows') - ones(lags) * log.(cps)'
-    dg = DataFrames.DataFrame(xvar=(ones(lags) * pows')[:],
-                              yvar=Z[:])
-    ols_sigma = GLM.lm(@GLM.formula(yvar ~ xvar), dg)
-
-    return Y, Dict('H'=>ols_hurst, 'σ'=>ols_sigma)
-end
-
-"""
-Extract the estimates of Hurst and voaltility from the result of `powlaw_estim`.
-"""
-function powlaw_coeff(ols::Dict, h::Float64)
-    H = GLM.coef(ols['H'])[2]
-    σ = exp(GLM.coef(ols['σ'])[2] - H * log(h))
-
-    return H, σ
-end
-
-
 ##### Generalized scalogram #####
-
-# function scalogram_estim(Cxx::Matrix{Float64}, sclrng::AbstractArray{Int}, ρmax::Int=1)
-#     nr, nc = size(Cxx)
-#     @assert nr == nc == length(sclrng)
-#     @assert ρmax >= 1
-#     xvar = Float64[]
-#     yvar = Float64[]
-#     for ρ=1:ρmax
-#         toto = [Cxx[j, ρ*j] for j in 1:nr if ρ*j<=nr]
-#         xvar = vcat(xvar, sclrng[1:length(toto)])
-#         yvar = vcat(yvar, abs.(toto))
-#     end
-#     df = DataFrames.DataFrame(
-#         xvar=log2.(xvar),
-#         yvar=log2.(yvar)
-#     )
-#     ols_hurst = GLM.lm(@GLM.formula(yvar~xvar), df)
-#     hurst_estim = (GLM.coef(ols_hurst)[2]-1)/2    
-#     return hurst_estim, ols_hurst
-# end
 
 """
     scalogram_estim(C::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, ρ::Int=1)
@@ -158,13 +73,8 @@ function scalogram_estim(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int,
     C2 = C1rho(0, ρ, hurst_estim, v, mode)
     σ_estim = ℯ^((coef[1] - log(abs(C2)) - (hurst_estim+1/2)*log(ρ))/2)
     
-    return (hurst_estim, σ_estim), ols, df
+    return (hurst_estim, σ_estim), ols
 end
-
-# function scalogram_estim(X::AbstractVector{T}, sclrng::AbstractArray{Int}, v::Int, ρ::Int=1) where T
-#     Xm::Matrix{Float64} = hcat(X...)'
-#     return scalogram_estim(Xm, sclrng, v, ρ)
-# end
 
 # function rolling_estim(fun::Function, X::AbstractVector{T}, wsize::Int, p::Int=1) where T
 #     offset = wsize-1
@@ -191,96 +101,118 @@ end
 ##### Wavelet-MLE #####
 
 """
-    Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real, s::Real)
+    wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, α::Real, β::Real; cflag::Bool=true, mode::Symbol=:center)
 
 # Args
 - X: each row is an observation
 """
-function Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real, σ::Real; mode::Symbol=:center)
+
+## MLE with constraints by change of variable ##
+
+function wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, α::Real, β::Real; cflag::Bool=true, mode::Symbol=:center)
     N, d = size(X)  # length and dim of X
+
+    H = cflag ? sigmoid(α) : α
+    σ = cflag ? exp(β) : β
+    
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
     C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
-    
+
     Σ = σ^2 * C1 .* A
     Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
-    # println("H=$H, σ=$σ, det(Σ)=$(det(Σ))")
+
+    println("H=$(H), σ=$(σ), α=$(α), β=$(β), mean(Σ)=$(mean(abs.(Σ)))")
+    println("logdet(Σ)=$(logdet(Σ))")
     
+    # method 1:
     # iX = Σ \ X'
+
+    # method 2:
     iΣ = pinv(Σ)  # regularization by pseudo-inverse
-    iX = iΣ * X'
+    iX = iΣ * X'  # regularization by pseudo-inverse
+
+    # method 3:
+    # iX = lsqr(Σ, X')
     
-    return -1/2 * (tr(X*iX) + N*log(abs(det(Σ))) + N*d*log(2π))
+    return -1/2 * (tr(X*iX) + N*logdet(Σ) + N*d*log(2π))
 end
 
-function grad_Wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real, σ::Real; mode::Symbol=:center)
+
+function grad_wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, α::Real, β::Real; cflag::Bool=true, mode::Symbol=:center)
     N, d = size(X)  # length and dim of X
+
+    H = cflag ? sigmoid(α) : α
+    σ = cflag ? exp(β) : β
+
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
     C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
     dAda = [log(i*j) for i in sclrng, j in sclrng] .* A
     dC1da = [diff_C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
+    
+    if cflag        
+        dAda *= diff_sigmoid(α)
+        dC1da *= diff_sigmoid(α)
+    end
 
     Σ = σ^2 * C1 .* A
-    Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
-
+    # Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
     dΣda = σ^2 * (dC1da .* A + C1 .* dAda)
-    dΣdb = 2σ * C1 .* A
+    dΣdb = cflag ? 2*Σ : 2σ * C1 .* A
 
+    # method 1:
     # iX = Σ \ X'
     # da = N * tr(Σ \ dΣda) - tr(iX' * dΣda * iX)
     # db = N * tr(Σ \ dΣdb) - tr(iX' * dΣdb * iX)
 
-    iΣ = pinv(Σ)  # regularization by pseudo-inverse
-    iX = iΣ * X'
-    da = N * tr(iΣ * dΣda) - tr(iX' * dΣda * iX)
-    db = N * tr(iΣ * dΣdb) - tr(iX' * dΣdb * iX)
+    # method 2:
+    # iΣ = pinv(Σ)  # regularization by pseudo-inverse
+    # iX = iΣ * X'
+    # da = N * tr(iΣ * dΣda) - tr(iX' * dΣda * iX)
+    # db = N * tr(iΣ * dΣdb) - tr(iX' * dΣdb * iX)
+
+    # method 3:
+    iX = lsqr(Σ, X')
+    da = N * tr(lsqr(Σ, dΣda)) - tr(iX' * dΣda * iX)
+    db = N * tr(lsqr(Σ, dΣdb)) - tr(iX' * dΣdb * iX)
 
     return  -1/2 * [da, db]
 end
 
-## MLE with constraints by change of variable ##
 
-function Wavelet_MLE_obj_sgm(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, α::Real, β::Real; mode::Symbol=:center)
-    N, d = size(X)  # length and dim of X
+function wavelet_MLE_estim(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, d::Int=1, vars::Symbol=:all, init::Vector{Float64}=[0.,0.]; cflag::Bool=true, dflag::Bool=false, mode::Symbol=:center)
+    @assert size(X,2) == length(sclrng)
+    @assert length(init) == 2
+    @assert d >= 1
 
-    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2*sigmoid(α)+1)
-    C1 = [C1rho(0, j/i, sigmoid(α), v, mode) for i in sclrng, j in sclrng]
+    func = x -> ()
+    grad = x -> ()
+    hurst_estim, σ_estim = init
 
-    Σ = exp(2β) * C1 .* A
-    Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
+    if vars == :all
+        func = x -> -wavelet_MLE_obj(X[1:d:end, :], sclrng, v, x[1], x[2]; cflag=cflag, mode=mode)
+        grad = x -> -grad_wavelet_MLE_obj(X[1:d:end,:], sclrng, v, x[1], x[2]; cflag=cflag, mode=mode)
+    elseif vars == :hurst
+        func = x -> -wavelet_MLE_obj(X[1:d:end, :], sclrng, v, x[1], σ_estim; cflag=cflag, mode=mode)
+        grad = x -> -grad_wavelet_MLE_obj(X[1:d:end,:], sclrng, v, x[1], σ_estim; cflag=cflag, mode=mode)
+    else
+        func = x -> -wavelet_MLE_obj(X[1:d:end, :], sclrng, v, hurst_estim, x[2]; cflag=cflag, mode=mode)
+        grad = x -> -grad_wavelet_MLE_obj(X[1:d:end,:], sclrng, v, hurst_estim, x[2]; cflag=cflag, mode=mode)
+    end
 
-    # println("α=$α, β=$β")
-    # println("H=$(sigmoid(α)), σ=$(exp(β)), det(Σ)=$(det(Σ))")
-    # println("C1=$C1")
+    # opm = dflag ? Optim.optimize(func, grad, init, Optim.BFGS(); inplace=false) : Optim.optimize(func, init, Optim.BFGS()) #, Optim.Options(f_tol=1e-10, iterations=100))
     
-    # iX = Σ \ X'
-
-    iΣ = pinv(Σ)
-    iX = iΣ * X'  # regularization by pseudo-inverse
-
-    return -1/2 * (tr(X*iX) + N*log(abs(det(Σ))) + N*d*log(2π))
+    opm = Optim.optimize(func, [1e-3, 0], [1-1e-3, Inf], init, Optim.Fminbox(Optim.GradientDescent()))
+    res = Optim.minimizer(opm)
+    
+    if vars == :all
+        hurst_estim = sigmoid(res[1])
+        σ_estim = exp(res[2])
+    elseif vars == :hurst
+        hurst_estim = sigmoid(res[1])
+    else
+        σ_estim = exp(res[2])
+    end
+    
+    return (hurst_estim, σ_estim), opm
 end
-
-function grad_Wavelet_MLE_obj_sgm(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, α::Real, β::Real; mode::Symbol=:center)
-    N, d = size(X)  # length and dim of X
-
-    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2*sigmoid(α)+1)
-    C1 = [C1rho(0, j/i, sigmoid(α), v, mode) for i in sclrng, j in sclrng]
-    dAda = diff_sigmoid(α) * [log(i*j) for i in sclrng, j in sclrng] .* A
-    dC1da = diff_sigmoid(α) * [diff_C1rho(0, j/i, sigmoid(α), v, mode) for i in sclrng, j in sclrng]
-
-    Σ = exp(2β) * C1 .* A
-    Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
-    dΣda = exp(2β) * (dC1da .* A + C1 .* dAda)
-    dΣdb = 2*Σ
-
-    # iX = Σ \ X'
-    # da = N * tr(Σ \ dΣda) - tr(iX' * dΣda * iX)
-    # db = N * tr(Σ \ dΣdb) - tr(iX' * dΣdb * iX)
-
-    iΣ = pinv(Σ)  # regularization by pseudo-inverse
-    iX = iΣ * X'
-    da = N * tr(iΣ * dΣda) - tr(iX' * dΣda * iX)
-    db = N * tr(iΣ * dΣdb) - tr(iX' * dΣdb * iX)
-
-    return  -1/2 * [da, db]
-end
+    

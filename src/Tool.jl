@@ -1,5 +1,41 @@
 ##### Algebra #####
 
+function norm(X::AbstractMatrix, p::Real=2; dims::Int=1)
+    if dims==1
+        return [LinearAlgebra.norm(X[:,n],p) for n=1:size(X,2)]
+    else
+        return [LinearAlgebra.norm(X[n,:],p) for n=1:size(X,1)]
+    end
+end
+
+
+function pinv_iter(A::AbstractMatrix, method::Symbol=:lsqr)
+    iA = zeros(Float64, size(A'))
+    try
+        iA = pinv(A)
+    catch
+        for c = 1:size(iA, 2)
+            b = zeros(Float64, size(A,1))
+            b[c] = 1.
+            iA[:,c] = IterativeSolvers.lsqr(A, b)
+        end
+    end
+    return iA
+end
+
+
+"""
+Compute A^-1 * B using the lsqr iterative method.
+"""
+function lsqr(A::AbstractMatrix{T}, B::AbstractMatrix{T}; kwargs...) where {T<:Real}
+    # println("My lsqr")
+    X = zeros(Float64, (size(A,2), size(B,2)))
+    for n=1:size(B,2)
+        X[:,n] = lsqr(A, B[:,n])
+    end
+    return X
+end
+
 """
     LevinsonDurbin(cseq::Vector{Float64})
 
