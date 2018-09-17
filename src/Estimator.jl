@@ -110,7 +110,71 @@ end
 ## MLE with constraints by change of variable ##
 
 
-function wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real, σ::Real; mode::Symbol=:center)
+function full_wavelet_covmat(N::Int, sclrng::AbstractArray{Int}, v::Int, H::Real, mode::Symbol)
+    J = length(sclrng)
+    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+    Σs = [[C1rho(d/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng] .* A for d = 0:N-1]
+    
+    Σ = zeros((N*J, N*J))
+    for r = 0:N-1
+        for c = 0:N-1
+            Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (c>=r) ? Σs[c-r+1] : Σs[r-c+1]'
+        end
+    end    
+
+    return Σ
+    # return [(c>=r) ? Σs[c-r+1] : Σs[r-c+1]' for r=0:N-1, c=0:N-1]
+end
+
+
+function full_wavelet_log_likelihood_H(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real; mode::Symbol=:center)
+    # @assert size(X,2) == length(sclrng)
+    
+    N, J = size(X)  # length and dim of X
+    Xv = reshape(X', 1, :)[:]  # row concatenation of X
+    
+    Σ = full_wavelet_covmat(N, sclrng, v, H, mode)
+    iΣ = pinv(Σ)  # regularization by pseudo-inverse
+
+    return -1/2 * (J*N*log(Xv'*iΣ*Xv) + logdet(Σ))
+end
+
+
+function full_wavelet_MLE_estim(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int; init::Real=0.5, mode::Symbol=:center)
+    @assert size(X,2) == length(sclrng)
+
+    N, J = size(X)  # length and dim of X
+    func = x -> -full_wavelet_log_likelihood_H(X, sclrng, v, x[1]; mode=mode)
+
+    ε = 1e-5
+    # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+    optimizer = Optim.BFGS()
+    # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+    opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+
+    hurst = Optim.minimizer(opm)[1]
+
+    Σ = full_wavelet_covmat(N, sclrng, v, hurst, mode)
+    iΣ = pinv(Σ)  # regularization by pseudo-inverse
+    σ = sqrt(sum(X' .* (iΣ * X')) / (J*N))
+    
+    return (hurst, σ), opm
+end
+
+
+function partial_wavelet_log_likelihood_H(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real; mode::Symbol=:center)
+    N, J = size(X)  # length and dim of X
+
+    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+    Σ = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng] .* A
+
+    iΣ = pinv(Σ)  # regularization by pseudo-inverse
+    
+    return -1/2 * (J*N*log(sum(X' .* (iΣ * X'))) + N*logdet(Σ))
+end
+
+
+function partial_wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real, σ::Real; mode::Symbol=:center)
     N, d = size(X)  # length and dim of X
 
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
@@ -135,6 +199,34 @@ function wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int,
     return -1/2 * (tr(X*iX) + N*logdet(Σ) + N*d*log(2π))
 end
 
+
+# function wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real, σ::Real; mode::Symbol=:center)
+#     N, d = size(X)  # length and dim of X
+
+#     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+#     C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
+
+#     Σ = σ^2 * C1 .* A
+#     # Σ += Matrix(1.0I, size(Σ)) * max(1e-10, mean(abs.(Σ))*1e-5)
+
+#     # println("H=$(H), σ=$(σ), mean(Σ)=$(mean(abs.(Σ)))")
+#     # println("logdet(Σ)=$(logdet(Σ))")
+
+#     # method 1:
+#     # iX = Σ \ X'
+
+#     # method 2:
+#     iΣ = pinv(Σ)  # regularization by pseudo-inverse
+#     iX = iΣ * X'  # regularization by pseudo-inverse
+
+#     # # method 3:
+#     # iX = lsqr(Σ, X')
+
+#     return -1/2 * (tr(X*iX) + N*logdet(Σ) + N*d*log(2π))
+# end
+
+
+# older version:
 # function wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, α::Real, β::Real; cflag::Bool=false, mode::Symbol=:center)
 #     N, d = size(X)  # length and dim of X
 
@@ -164,45 +256,45 @@ end
 # end
 
 
-function grad_wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, α::Real, β::Real; cflag::Bool=false, mode::Symbol=:center)
-    N, d = size(X)  # length and dim of X
+# function grad_wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, α::Real, β::Real; cflag::Bool=false, mode::Symbol=:center)
+#     N, d = size(X)  # length and dim of X
 
-    H = cflag ? sigmoid(α) : α
-    σ = cflag ? exp(β) : β
+#     H = cflag ? sigmoid(α) : α
+#     σ = cflag ? exp(β) : β
 
-    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
-    C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
-    dAda = [log(i*j) for i in sclrng, j in sclrng] .* A
-    dC1da = [diff_C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
+#     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+#     C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
+#     dAda = [log(i*j) for i in sclrng, j in sclrng] .* A
+#     dC1da = [diff_C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
 
-    if cflag
-        dAda *= diff_sigmoid(α)
-        dC1da *= diff_sigmoid(α)
-    end
+#     if cflag
+#         dAda *= diff_sigmoid(α)
+#         dC1da *= diff_sigmoid(α)
+#     end
 
-    Σ = σ^2 * C1 .* A
-    # Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
-    dΣda = σ^2 * (dC1da .* A + C1 .* dAda)
-    dΣdb = cflag ? 2*Σ : 2σ * C1 .* A
+#     Σ = σ^2 * C1 .* A
+#     # Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
+#     dΣda = σ^2 * (dC1da .* A + C1 .* dAda)
+#     dΣdb = cflag ? 2*Σ : 2σ * C1 .* A
 
-    # method 1:
-    # iX = Σ \ X'
-    # da = N * tr(Σ \ dΣda) - tr(iX' * dΣda * iX)
-    # db = N * tr(Σ \ dΣdb) - tr(iX' * dΣdb * iX)
+#     # method 1:
+#     # iX = Σ \ X'
+#     # da = N * tr(Σ \ dΣda) - tr(iX' * dΣda * iX)
+#     # db = N * tr(Σ \ dΣdb) - tr(iX' * dΣdb * iX)
 
-    # method 2:
-    iΣ = pinv(Σ)  # regularization by pseudo-inverse
-    iX = iΣ * X'
-    da = N * tr(iΣ * dΣda) - tr(iX' * dΣda * iX)
-    db = N * tr(iΣ * dΣdb) - tr(iX' * dΣdb * iX)
+#     # method 2:
+#     iΣ = pinv(Σ)  # regularization by pseudo-inverse
+#     iX = iΣ * X'
+#     da = N * tr(iΣ * dΣda) - tr(iX' * dΣda * iX)
+#     db = N * tr(iΣ * dΣdb) - tr(iX' * dΣdb * iX)
 
-    # method 3:
-    # iX = lsqr(Σ, X')
-    # da = N * tr(lsqr(Σ, dΣda)) - tr(iX' * dΣda * iX)
-    # db = N * tr(lsqr(Σ, dΣdb)) - tr(iX' * dΣdb * iX)
+#     # method 3:
+#     # iX = lsqr(Σ, X')
+#     # da = N * tr(lsqr(Σ, dΣda)) - tr(iX' * dΣda * iX)
+#     # db = N * tr(lsqr(Σ, dΣdb)) - tr(iX' * dΣdb * iX)
 
-    return  -1/2 * [da, db]
-end
+#     return  -1/2 * [da, db]
+# end
 
 
 function wavelet_MLE_estim(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int; vars::Symbol=:all, init::Vector{Float64}=[0.5,1.], mode::Symbol=:center)

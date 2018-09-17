@@ -643,12 +643,8 @@ function Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; rng::T
     # println("τ=$τ, ρ=$ρ, H=$H, v=$v") #
 
     res = QuadGK.quadgk(f, rng...)[1]
-    # res = try
-    #     # QuadGK.quadgk(f, -100, 100, order=10)[1]
-    #     QuadGK.quadgk(f, rng...)[1]
-    # catch
-    #     1e-3 * sum(f.(rng[1]:1e-3:rng[2]))
-    # end
+    # res = 1e-4 * sum(f.(rng[1]:1e-4:rng[2]))
+
     return res
 end
 
