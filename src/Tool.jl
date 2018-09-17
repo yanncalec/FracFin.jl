@@ -39,7 +39,7 @@ end
 """
     LevinsonDurbin(cseq::Vector{Float64})
 
-Diagonalization of a symmetric positive definite Toeplitz matrix using Levinson-Durbin (LD) method by providing `cseq`, 
+Diagonalization of a symmetric positive definite Toeplitz matrix using Levinson-Durbin (LD) method by providing `cseq`,
 the covariance sequence of a stationary process.
 
 # Returns
@@ -582,16 +582,16 @@ end
 
 
 """
-Evaluate the Fourier transform of B-Spline wavelet.
+Evaluate the Fourier transform of a centered B-Spline wavelet.
 """
 function _bspline_ft(ω::Real, v::Int)
-#     @assert v>0  # check vanishing moment   
+#     @assert v>0  # check vanishing moment
 
-    # Version 1: non centered ψ. This works with convolution mode `:left`` and produces artefacts of radiancy straight lines.
-    return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(sqrt(2π)*1im*ω))^(v)  # non-centered bspline: supported on [0, v]
-    
-    # # Version 2: centered ψ. This works with convolution mode `:center` which is non-causal add produces artefacts of radial circles.
-    # return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(sqrt(2π)*1im*ω) * exp(-1im*ω/2))^(v)  # centered bspline: supported on [-v/2, v/2]
+    # # Version 1: non centered ψ. This works with convolution mode `:left`` and produces artefacts of radiancy straight lines.
+    # return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(sqrt(2π)*1im*ω))^(v)  # non-centered bspline: supported on [0, v]
+
+    # Version 2: centered ψ. This works with convolution mode `:center` which is non-causal add produces artefacts of radial circles.
+    return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(sqrt(2π)*1im*ω) * exp(-1im*ω/2))^(v)  # centered bspline: supported on [-v/2, v/2]
 end
 
 
@@ -617,19 +617,19 @@ Evaluate the integrand function of G^ψ_ρ(τ, H)
 """
 function Gfunc_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int, mode::Symbol)
     # @assert ρ>0 && 1>H>0 && v>0
-    
-    # The integrand is, by definition 
+
+    # The integrand is, by definition
     # _bspline_ft(ω*√ρ, v) * conj(_bspline_ft(ω/√ρ, v)) / abs(ω)^(2H+1) * exp(-1im*ω*τ)
-    # this should be modulated by 
-    # exp(1im*ω*v*(√ρ-1/√ρ)/2), if the convolution mode is :left, i.e. causal
-    # or exp(-1im*ω*v*(√ρ-1/√ρ)/2), if the convolution mode is :right, i.e. anti-causal
+    # this should be modulated by
+    #    exp(-1im*ω*v*(√ρ-1/√ρ)/2), if the convolution mode is :left, i.e. causal
+    # or exp(+1im*ω*v*(√ρ-1/√ρ)/2), if the convolution mode is :right, i.e. anti-causal
     # However, such implementation is numerically unstable due to singularities. We rewrite the function in an equivalent form using the sinc function which is numerically stable.
     if mode == :center
         return Gfunc_bspline_integrand_center(τ, ω, ρ, H, v)
     elseif mode == :left
-        return Gfunc_bspline_integrand_center(τ-v*(√ρ-1/√ρ)/2, ω, ρ, H, v)
-    elseif mode == :right
         return Gfunc_bspline_integrand_center(τ+v*(√ρ-1/√ρ)/2, ω, ρ, H, v)
+    elseif mode == :right
+        return Gfunc_bspline_integrand_center(τ-v*(√ρ-1/√ρ)/2, ω, ρ, H, v)
     else
         throw(UndefRefError("Unknown mode: $(mode)"))
     end
@@ -640,14 +640,15 @@ Evaluate the function G^ψ_ρ(τ,H) by numerical integration.
 """
 function Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
     f = ω -> Gfunc_bspline_integrand(τ, ω, ρ, H, v, mode)
-    # println("τ=$τ, ρ=$ρ, H=$H, v=$v") # 
+    # println("τ=$τ, ρ=$ρ, H=$H, v=$v") #
 
-    res = try
-        # QuadGK.quadgk(f, -100, 100, order=10)[1]
-        QuadGK.quadgk(f, rng...)[1]
-    catch
-        1e-3 * sum(f.(rng[1]:1e-3:rng[2]))
-    end
+    res = QuadGK.quadgk(f, rng...)[1]
+    # res = try
+    #     # QuadGK.quadgk(f, -100, 100, order=10)[1]
+    #     QuadGK.quadgk(f, rng...)[1]
+    # catch
+    #     1e-3 * sum(f.(rng[1]:1e-3:rng[2]))
+    # end
     return res
 end
 
@@ -656,12 +657,13 @@ Derivative w.r.t. H
 """
 function diff_Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
     f = ω -> ((ω==0) ? 0 : (-log(ω^2) * Gfunc_bspline_integrand(τ, ω, ρ, H, v, mode)))
-    res = try
-        # QuadGK.quadgk(f, -100, 100, order=10)[1]
-        QuadGK.quadgk(f, rng...)[1]
-    catch
-        1e-3 * sum(f.(rng[1]:1e-3:rng[2]))
-    end
+    res = QuadGK.quadgk(f, rng...)[1]
+    # res = try
+    #     # QuadGK.quadgk(f, -100, 100, order=10)[1]
+    #     QuadGK.quadgk(f, rng...)[1]
+    # catch
+    #     1e-3 * sum(f.(rng[1]:1e-3:rng[2]))
+    # end
     return res
 end
 
@@ -722,7 +724,7 @@ Multi-linear regression of data matrix Y versus X in the column direction, i.e. 
 """
 function multi_linear_regression_colwise(Y::Matrix{Float64}, X::Matrix{Float64}, w::StatsBase.AbstractWeights)
     @assert size(Y,1)==size(X,1)==length(w)
-    
+
     μy = mean(Y, w, 1)[:]  # do not take keyword argument `dims=1` if weight is passed.
     μx = mean(X, w, 1)[:]
     Σyx = cov(Y, X, w)  # this calls user defined cov function
@@ -742,7 +744,7 @@ function multi_linear_regression(Y::Matrix{Float64}, X::Matrix{Float64}, w::Stat
     end
 end
 
-multi_linear_regression(Y::Matrix{Float64}, X::Matrix{Float64}; dims::Int=1) = 
+multi_linear_regression(Y::Matrix{Float64}, X::Matrix{Float64}; dims::Int=1) =
     multi_linear_regression(Y, X, StatsBase.weights(ones(size(Y,1))); dims=dims)
 
 """
@@ -750,7 +752,7 @@ value of regularization constant
 """
 function IRLS(Y::Matrix{Float64}, X::Matrix{Float64}, pnorm::Real=2.; maxiter::Int=10^3, tol::Float64=10^-3, vreg::Float64=1e-8)
     @assert pnorm > 0
-    
+
     wfunc = E -> (sqrt.(sum(E.*E, dims=2) .+ vreg).^(pnorm-2))[:]  # function for computing weight vector
     (A, β), E, Σ = multi_linear_regression(Y, X)  # initialization
     w0::Vector{Float64} =  wfunc(E) # weight vector
@@ -768,6 +770,6 @@ function IRLS(Y::Matrix{Float64}, X::Matrix{Float64}, pnorm::Real=2.; maxiter::I
     end
     println(n)
     println(err)
-    
+
     return (A, β), w0, E, sum(sqrt.(sum(E.*E, dims=2)).^pnorm)
 end

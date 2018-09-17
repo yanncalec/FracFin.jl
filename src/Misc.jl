@@ -15,7 +15,7 @@
 #         yvar=log2.(yvar)
 #     )
 #     ols_hurst = GLM.lm(@GLM.formula(yvar~xvar), df)
-#     hurst_estim = (GLM.coef(ols_hurst)[2]-1)/2    
+#     hurst_estim = (GLM.coef(ols_hurst)[2]-1)/2
 #     return hurst_estim, ols_hurst
 # end
 
@@ -166,21 +166,21 @@ function wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int,
     N, d = size(X)  # length and dim of X
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
     C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
-    
+
     Σ = σ^2 * C1 .* A
     # Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
     # println("H=$H, σ=$σ, det(Σ)=$(det(Σ))")
 
     # method 1:
     # iX = Σ \ X'  # <- unstable!
-    
+
     # method 2:
     # iΣ = pinv(Σ)  # regularization by pseudo-inverse
     # iX = iΣ * X'
 
     # method 3:
     iX = lsqr(Σ, X')
-    
+
     return -1/2 * (tr(X*iX) + N*logdet(Σ) + N*d*log(2π))
 end
 
@@ -215,4 +215,45 @@ function grad_wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v:
     db = N * tr(lsqr(Σ, dΣdb)) - tr(iX' * dΣdb * iX)
 
     return  -1/2 * [da, db]
+end
+
+
+
+
+function wavelet_MLE_estim(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, d::Int=1, vars::Symbol=:all, init::Vector{Float64}=[0.5,1.]; cflag::Bool=false, dflag::Bool=false, mode::Symbol=:center)
+    @assert size(X,2) == length(sclrng)
+    @assert length(init) == 2
+    @assert d >= 1
+
+    func = x -> ()
+    grad = x -> ()
+    hurst_estim, σ_estim = init
+
+    if vars == :all
+        func = x -> -wavelet_MLE_obj(X[1:d:end, :], sclrng, v, x[1], x[2]; cflag=cflag, mode=mode)
+        grad = x -> -grad_wavelet_MLE_obj(X[1:d:end,:], sclrng, v, x[1], x[2]; cflag=cflag, mode=mode)
+    elseif vars == :hurst
+        func = x -> -wavelet_MLE_obj(X[1:d:end, :], sclrng, v, x[1], σ_estim; cflag=cflag, mode=mode)
+        grad = x -> -grad_wavelet_MLE_obj(X[1:d:end,:], sclrng, v, x[1], σ_estim; cflag=cflag, mode=mode)
+    else
+        func = x -> -wavelet_MLE_obj(X[1:d:end, :], sclrng, v, hurst_estim, x[2]; cflag=cflag, mode=mode)
+        grad = x -> -grad_wavelet_MLE_obj(X[1:d:end,:], sclrng, v, hurst_estim, x[2]; cflag=cflag, mode=mode)
+    end
+
+    ε = 1e-10
+    # opm = Optim.optimize(func, [ε, ε], [1-ε, 1/ε], init, Optim.Fminbox(Optim.GradientDescent()))
+    opm = dflag ? Optim.optimize(func, grad, [ε, ε], [1-ε, 1/ε], init, Optim.Fminbox(Optim.GradientDescent()); inplace=false) : Optim.optimize(func, [ε, ε], [1-ε, 1/ε], init, Optim.Fminbox(Optim.GradientDescent()))
+    # Optim.BFGS() or Optim.GradientDescent()
+    res = Optim.minimizer(opm)
+
+    if vars == :all
+        hurst_estim = cflag ? sigmoid(res[1]) : res[1]
+        σ_estim = cflag ? exp(res[2]) : res[2]
+    elseif vars == :hurst
+        hurst_estim = cflag ? sigmoid(res[1]) : res[1]
+    else
+        σ_estim = cflag ? exp(res[2]) : res[2]
+    end
+
+    return (hurst_estim, σ_estim), opm
 end
