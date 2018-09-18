@@ -595,12 +595,15 @@ function _bspline_ft(ω::Real, v::Int)
 end
 
 
-#### mBm wavelet analysis ####
+#### B-Spline wavelet analysis ####
+
+maxscale_bspline(N::Int, v::Int) = floor(Int, (N+1)/v/2)
 
 """
 The integrand function of G^ψ_ρ(τ, H) with a centered B-spline wavelet.
 """
 function Gfunc_bspline_integrand_center(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
+    # @assert v > H+1/2
     return 1/16^v * 1/2π * (ω^2)^(v-(H+1/2)) * (sinc(ω*√ρ/4π)*sinc(ω/√ρ/4π))^(2v) * cos(ω*τ)
 end
 
