@@ -5,15 +5,18 @@ Real Gaussian stochastic process.
 """
 abstract type StochasticProcess{T<:TimeStyle}<:Sampleable{Univariate, Continuous} end
 
+
 """
 Process with integer time index (time-series).
 """
 const DiscreteTimeStochasticProcess = StochasticProcess{DiscreteTime}
 
+
 """
 Process with real time index.
 """
 const ContinuousTimeStochasticProcess = StochasticProcess{ContinuousTime}
+
 
 """
 Stationary process.
@@ -23,6 +26,7 @@ abstract type StationaryProcess{T}<:StochasticProcess{T} end
 const DiscreteTimeStationaryProcess = StationaryProcess{DiscreteTime}
 const ContinuousTimeStationaryProcess = StationaryProcess{ContinuousTime}
 
+
 """
 Self-similar process.
 
@@ -31,6 +35,7 @@ Self-similar process.
 """
 abstract type SelfSimilarProcess<:ContinuousTimeStochasticProcess end
 
+
 """
     ss_exponent(X::SelfSimilarProcess)
 
@@ -38,15 +43,18 @@ Return the self-similar exponent of the process.
 """
 ss_exponent(X::SelfSimilarProcess) = throw(NotImplementedError("ss_exponent(::$(typeof(X)))"))
 
+
 """
 Non-stationary process of increments.
 """
 abstract type NonStationaryIncrementProcess{T<:TimeStyle, P<:StochasticProcess}<:StochasticProcess{T} end
 
+
 """
 Stationary process of increments.
 """
 abstract type StationaryIncrementProcess{T<:TimeStyle, P<:StochasticProcess}<:StationaryProcess{T} end
+
 
 """
 Process of increments including both non-stationary and stationary cases.
@@ -57,10 +65,12 @@ Process of increments including both non-stationary and stationary cases.
 """
 const IncrementProcess{T<:TimeStyle, P<:StochasticProcess} = Union{NonStationaryIncrementProcess{T, P}, StationaryIncrementProcess{T, P}}
 
+
 """
 Self-similar process with stationary increments (SSSI).
 """
 abstract type SSSIProcess<:SelfSimilarProcess end
+
 
 """
 Process of increments of a SSSI process.
@@ -70,12 +80,14 @@ abstract type IncrementSSSIProcess{T<:TimeStyle, P<:SSSIProcess}<:StationaryIncr
 const DiscreteTimeIncrementSSSIProcess{P<:SSSIProcess} = IncrementSSSIProcess{DiscreteTime, P}
 const ContinuousTimeIncrementSSSIProcess{P<:SSSIProcess} = IncrementSSSIProcess{ContinuousTime, P}
 
+
 """
     step(X::IncrementProcess)
 
 Return the step of increment of the process.
 """
 step(X::IncrementProcess) = throw(NotImplementedError("step(::$(typeof(X)))"))
+
 
 """
     ss_exponent(X::IncrementSSSIProcess)
@@ -84,12 +96,14 @@ Return the self-similar exponent of the parent process.
 """
 ss_exponent(X::IncrementSSSIProcess) = throw(NotImplementedError("ss_exponent(::$(typeof(X)))"))
 
+
 """
     autocov(X::StochasticProcess{T}, i::T, j::T) where T
 
 Auto-covariance function of a stochastic process.
 """
 autocov(X::StochasticProcess{T}, i::T, j::T) where T = throw(NotImplementedError("autocov(::$(typeof(X)), ::$(T), ::$(T))"))
+
 
 """
     autocov!(C::Matrix{Float64}, X::StochasticProcess, G::SamplingGrid)
@@ -113,6 +127,7 @@ function autocov!(C::Matrix{Float64}, X::StochasticProcess{T}, G::SamplingGrid{<
     return C
 end
 
+
 """
     autocov(X::StochasticProcess, G::SamplingGrid)
 
@@ -121,12 +136,16 @@ Return the auto-covarince matrix of a stochastic process on a sampling grid.
 autocov(X::StochasticProcess{T}, G::SamplingGrid{<:T}) where T = autocov!(Matrix{Float64}(undef, length(G),length(G)), X, G)
 # autocov(X::StationaryProcess, G::SamplingGrid) = autocov!(Matrix{Float64}(length(G), length(G)), X, G)
 
+
 """
     covmat(X::StochasticProcess, G::SamplingGrid)
 
 Alias to `autocov(X::StochasticProcess, G::SamplingGrid)`.
 """
 covmat(X::StochasticProcess{T}, G::SamplingGrid{<:T}) where T = autocov(X, G)
+
+covmat(X::DiscreteTimeStochasticProcess, N::Integer) = covmat(X, DiscreteTimeRegularGrid(1:N))
+
 
 """
     autocov(X::StationaryProcess, i::Real)
@@ -135,6 +154,7 @@ Auto-covarince function of a stationary stochastic process.
 """
 autocov(X::StationaryProcess{T}, i::T) where T = throw(NotImplementedError("autocov(::$(typeof(X)), ::Real)"))
 autocov(X::StationaryProcess{T}, i::T, j::T) where T = autocov(X, i-j)
+
 
 """
     autocov!(C::Vector{Float64}, X::StationaryProcess, G::RegularGrid)
@@ -152,12 +172,14 @@ function autocov!(C::Vector{Float64}, X::StationaryProcess{T}, G::RegularGrid{<:
     return C
 end
 
+
 """
     covseq(X::StationaryProcess, G::RegularGrid)
 
 Return the auto-covariance sequence of a stationary process on a regular grid.
 """
 covseq(X::StationaryProcess{T}, G::RegularGrid{<:T}) where T = autocov!(zeros(length(G)), X, G)
+
 
 function autocov!(C::Matrix{Float64}, X::StationaryProcess{T}, G::RegularGrid{<:T}) where T
     # check dimension
@@ -183,12 +205,14 @@ end
 #     end
 # end
 
+
 """
     partcorr(X::DiscreteTimeStationaryProcess, n::DiscreteTime)
 
 Return the partial correlation function of a stationary process.
 """
 partcorr(X::DiscreteTimeStationaryProcess, n::DiscreteTime) = throw(NotImplementedError("partcorr(::$(typeof(X)), ::$(typeof(n)))"))
+
 
 """
     partcorr!(C::Vector{Float64}, X::DiscreteTimeStationaryProcess, G::DiscreteTimeRegularGrid)    
@@ -205,6 +229,7 @@ function partcorr!(C::Vector{Float64}, X::DiscreteTimeStationaryProcess, G::Disc
     return C
 end
 
+
 """
     partcorr(X::DiscreteTimeStationaryProcess, G::DiscreteTimeRegularGrid, ld::Bool=false)
 
@@ -220,6 +245,7 @@ function partcorr(X::DiscreteTimeStationaryProcess, G::DiscreteTimeRegularGrid, 
         return partcorr!(Vector{Float64}(length(G)), X, G)
     end
 end
+
 
 """
     autocov(X::IncrementProcess{T, P}, t::T, s::T) where {T, P}
@@ -252,6 +278,7 @@ end
 
 ss_exponent(X::FractionalBrownianMotion) = X.hurst
 
+
 """
     autocov(X::FractionalBrownianMotion, t::ContinuousTime, s::ContinuousTime)
 
@@ -262,6 +289,7 @@ function autocov(X::FractionalBrownianMotion, t::ContinuousTime, s::ContinuousTi
     twoh::Float64 = 2*X.hurst
     return 0.5 * (abs(t)^twoh + abs(s)^twoh - abs(t-s)^twoh)
 end
+
 
 # Moving average kernels of fBm
 """
@@ -281,6 +309,7 @@ function Kplus(x::Real,t::Real,H::Real)
     return v
 end
 
+
 """
 K_- kernel
 """
@@ -297,15 +326,18 @@ function Kminus(x::Real,t::Real,H::Real)
     return v
 end
 
+
 """
 K_+ + K_- kernel
 """
 Kppm(x, t, H) = Kplus(x,t,H) + Kminus(x,t,H)
 
+
 """
 K_+ - K_- kernel
 """
 Kpmm(x, t, H) = Kplus(x,t,H) - Kminus(x,t,H)
+
 
 """
 Fractional Gaussian noise.
@@ -325,6 +357,7 @@ end
 step(X::FractionalGaussianNoise) = X.step
 
 ss_exponent(X::FractionalGaussianNoise) = X.parent_process.hurst
+
 
 """
     autocov(X::FractionalGaussianNoise, l::DiscreteTime)
@@ -359,9 +392,11 @@ ss_exponent(X::FractionalIntegrated) = X.d + 1/2
 
 partcorr(X::FractionalIntegrated, k::DiscreteTime) = X.d/(k-X.d)
 
+
 function autocov(X::FractionalIntegrated, n::DiscreteTime)
     return n > 0 ? (n-1+X.d) / (n-X.d) * autocov(X, n-1) : gamma(1-2*X.d) / gamma(1-X.d)^2
 end
+
 
 """
     autocov!(C::Vector{Float64}, X::FractionalIntegrated, G::DiscreteTimeRegularGrid)

@@ -27,7 +27,7 @@ import ForwardDiff
 import StatsBase
 import StatsBase: autocov!, autocov, mean, cov
 
-import LinearAlgebra: norm
+import LinearAlgebra: norm, pinv
 
 import IterativeSolvers
 import IterativeSolvers: lsqr
