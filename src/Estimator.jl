@@ -231,7 +231,7 @@ function full_bspline_MLE_estim(X::Matrix{Float64}, sclrng::AbstractArray{Int}, 
 
     hurst = Optim.minimizer(opm)[1]
 
-    Σ = full_bspline_covmat(N, sclrng, v, hurst, mode)
+    Σ = full_bspline_covmat(size(X,2), sclrng, v, hurst, mode)
     σ = sqrt(xiAx(Σ, X[:]) / length(X))
     
     return (hurst, σ), opm
