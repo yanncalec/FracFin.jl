@@ -32,7 +32,7 @@ function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, pows::Abstra
 
         yp = map(d -> log(moment_incr(X, d, p)), lags)
         xp = p * log.(lags)
-        Ap = hcat(xp, ones(xp))  # design matrix
+        Ap = hcat(xp, ones(length(xp)))  # design matrix
         H[n], β[n] = Ap \ yp  # estimation of H and β
 
         # dg = DataFrames.DataFrame(xvar=Ap, yvar=yp)
@@ -55,35 +55,46 @@ end
 ##### Generalized scalogram #####
 
 """
-    scalogram_estim(C::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, ρ::Int=1)
-
 Scalogram estimator for Hurst exponent and volatility.
 
 # Args
-- X: matrix of wavelet coefficients. Each column corresponds to one scale.
-- sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one column in the matrix X
+- X: matrix of wavelet coefficients. Each rwo corresponds to one scale.
+- sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one row in the matrix X
 - v: vanishing moments
-- ρ: integer ratio defining an oblique diagonal (i, ρi), e.g. ρ=1 corresponds to the main diagonal.
+- r: rational ratio defining a line in the covariance matrix, e.g. r=1 corresponds to the main diagonal.
 """
-function scalogram_estim(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, ρ::Int=1; mode::Symbol=:center)
-    @assert size(X,2) == length(sclrng)
+function scalogram_estim(X::AbstractMatrix{T}, sclrng::AbstractArray{Int}, v::Int, r::Rational=1//1; mode::Symbol=:center) where {T<:Real}
+    @assert size(X,1) == length(sclrng)
+    @assert r >= 1
+    if r > 1
+        all(diff(sclrng/sclrng[1]) .== 1) || error("Imcompatible scales: the ratio between the k-th and the 1st scale must be k")
+    end
+    
+    p,q,N = r.num, r.den, length(sclrng)
+    @assert N>=2p
+    
+    Σ = cov(X, X, dims=2, corrected=true)  # covariance matrix
+    
+    yr = [log(abs(Σ[q*j, p*j])) for j in 1:N if p*j<=N]
+    xr = [log(sclrng[q*j] * sclrng[p*j]) for j in 1:N if p*j<=N]
 
-    Σ = cov(X, X, dims=1, corrected=true)  # covariance matrix
-
-    yvar = [Σ[j, ρ*j] for j in 1:size(Σ,1) if ρ*j<=size(Σ,1)]
-    df = DataFrames.DataFrame(
-        X=log.(sclrng[1:length(yvar)]),
-        Y=log.(abs.(yvar))
-    )
+    df = DataFrames.DataFrame(X=xr, Y=yr)
     ols = GLM.lm(@GLM.formula(Y~X), df)
     coef = GLM.coef(ols)
 
-    hurst = (coef[2]-1)/2
-    C2 = C1rho(0, ρ, hurst, v, mode)
-    σ = ℯ^((coef[1] - log(abs(C2)) - (hurst+1/2)*log(ρ))/2)
-
+    hurst = coef[2]-1/2
+    C1 = C1rho(0, r, hurst, v, mode)
+    σ = ℯ^((coef[1] - log(abs(C1)))/2)
     return (hurst, σ), ols
+
+    # Ar = hcat(xr, ones(length(xr)))  # design matrix
+    # H0, η = Ar \ yr  # estimation of H and β
+    # hurst = H0-1/2
+    # C1 = C1rho(0, r, hurst, v, mode)
+    # σ = ℯ^((η - log(abs(C1)))/2)
+    # return hurst, σ
 end
+
 
 # function rolling_estim(fun::Function, X::AbstractVector{T}, wsize::Int, p::Int=1) where T
 #     offset = wsize-1
@@ -135,21 +146,24 @@ This function is common to all MLE problems with the covariance matrix of form �
 function log_likelihood_H(A::AbstractMatrix{T}, X::AbstractVecOrMat{T}, ε::Real=0) where {T<:Real}
     @assert issymmetric(A)
     @assert size(X, 1) == size(A, 1)
+    
+    N = ndims(X)>1 ? size(X,2) : 1
+    # d = size(X,1), such that N*d == length(X)
 
     S, U = eigen(A)  # so that U * Diagonal(S) * inv(U) == A, in particular, U' == inv(U)
     idx = (S .> ε)
-    return -1/2 * (length(X) * log(sum((U[:,idx]'*X).^2 ./ S[idx])) + sum(log.(S[idx])))
+    return -1/2 * (length(X) * log(sum((U[:,idx]'*X).^2 ./ S[idx])) + N * sum(log.(S[idx])))
 end
 
 
-function fGn_log_likelihood_H(X::Vector{Float64}, H::Real)
+function fGn_log_likelihood_H(X::AbstractVecOrMat{T}, H::Real) where {T<:Real}
     @assert 0 < H < 1
-    Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(H, 1.), length(X))))
+    Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(H, 1.), size(X,1))))
     return log_likelihood_H(Σ, X)
 end
 
 
-function fGn_MLE_estim(X::Vector{Float64}; init::Real=0.5)
+function fGn_MLE_estim(X::AbstractVecOrMat{T}; init::Real=0.5) where {T<:Real}
     func = h -> -fGn_log_likelihood_H(X, h)
 
     ε = 1e-5
@@ -160,7 +174,7 @@ function fGn_MLE_estim(X::Vector{Float64}; init::Real=0.5)
 
     hurst = Optim.minimizer(opm)[1]
     
-    Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(hurst, 1.), length(X))))
+    Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(hurst, 1.), size(X,1))))
     σ = sqrt(xiAx(Σ, X) / length(X))
     
     return (hurst, σ), opm
@@ -175,20 +189,20 @@ Compute the full covariance matrix of DCWT coefficients of a pure fBm with B-Spl
 The full covariance matrix of `J`-scale transform and of time-lag `N` is a N*J-by-N*J symmetric matrix.
 
 # Args
-- N: time-lag
+- l: maximum time-lag
 - sclrng: scale range
 - v: vanishing moments of B-Spline wavelet
 - H: Hurst exponent
 - mode: mode of convolution
 """
-function full_bspline_covmat(N::Int, sclrng::AbstractArray{Int}, v::Int, H::Real, mode::Symbol)
+function full_bspline_covmat(l::Int, sclrng::AbstractArray{Int}, v::Int, H::Real, mode::Symbol)
     J = length(sclrng)
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
-    Σs = [[C1rho(d/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng] .* A for d = 0:N-1]
+    Σs = [[C1rho(d/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng] .* A for d = 0:l]
     
-    Σ = zeros((N*J, N*J))
-    for r = 0:N-1
-        for c = 0:N-1
+    Σ = zeros(((l+1)*J, (l+1)*J))
+    for r = 0:l
+        for c = 0:l
             Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (c>=r) ? Σs[c-r+1] : transpose(Σs[r-c+1])
         end
     end
@@ -201,26 +215,32 @@ end
 """
 Evaluate the log-likelihood of DCWT coefficients of B-Spline wavelet with full covariance matrix.
 """
-function full_bspline_log_likelihood_H(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real; mode::Symbol=:center)
-    # @assert size(X,1) == length(sclrng)
-    J, N = size(X)  # dim of X    
-    Σ = full_bspline_covmat(N, sclrng, v, H, mode)  # full covariance matrix
+function full_bspline_log_likelihood_H(X::AbstractVecOrMat{T}, sclrng::AbstractArray{Int}, v::Int, H::Real; mode::Symbol=:center) where {T<:Real}
+    @assert size(X,1) % length(sclrng) == 0
+    J = length(sclrng)
+    L = size(X,1) ÷ J  # interger division: \div
+    N = ndims(X)>1 ? size(X,2) : 1
+
+    Σ = full_bspline_covmat(L-1, sclrng, v, H, mode)  # full covariance matrix
 
     # # strangely, the following does not work (logarithm of a negative value)
     # iΣ = pinv(Σ)  # regularization by pseudo-inverse
     # return -1/2 * (J*N*log(trace(X'*iΣ*X)) + logdet(Σ))
     
-    return log_likelihood_H(Σ, X[:])
+    return log_likelihood_H(Σ, X)
 end
 
 
 """
 B-Spline wavelet-MLE estimator with full covariance matrix.
 """
-function full_bspline_MLE_estim(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int; init::Real=0.5, mode::Symbol=:center)
-    @assert size(X,1) == length(sclrng)
+function full_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractArray{Int}, v::Int; init::Real=0.5, mode::Symbol=:center) where {T<:Real}
+    @assert size(X,1) % length(sclrng) == 0
+    J = length(sclrng)
+    L = size(X,1) ÷ J  # interger division: \div
+    # println(L)
+    N = ndims(X)>1 ? size(X,2) : 1
 
-    # J, N = size(X)  # dim of X    
     func = h -> -full_bspline_log_likelihood_H(X, sclrng, v, h; mode=mode)
 
     ε = 1e-5
@@ -231,21 +251,21 @@ function full_bspline_MLE_estim(X::Matrix{Float64}, sclrng::AbstractArray{Int}, 
 
     hurst = Optim.minimizer(opm)[1]
 
-    Σ = full_bspline_covmat(size(X,2), sclrng, v, hurst, mode)
-    σ = sqrt(xiAx(Σ, X[:]) / length(X))
+    Σ = full_bspline_covmat(L-1, sclrng, v, hurst, mode)
+    σ = sqrt(xiAx(Σ, X) / length(X))
     
     return (hurst, σ), opm
 end
 
 
 function partial_bspline_covmat(sclrng::AbstractArray{Int}, v::Int, H::Real, mode::Symbol)
-    return full_bspline_covmat(1, sclrng, v, H, mode)
+    return full_bspline_covmat(0, sclrng, v, H, mode)
 end
 
 
-function partial_bspline_log_likelihood_H(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::Int, H::Real; mode::Symbol=:center)
+function partial_bspline_log_likelihood_H(X::AbstractVecOrMat{T}, sclrng::AbstractArray{Int}, v::Int, H::Real; mode::Symbol=:center) where {T<:Real}
     # @assert size(X,1) == length(sclrng)
-    Σ = partial_bspline_covmat(sclrng, v, H, mode)  # full covariance matrix
+    Σ = partial_bspline_covmat(sclrng, v, H, mode)
     # println(size(Σ))
     # println(size(X))
     
@@ -256,7 +276,7 @@ end
 """
 B-Spline wavelet-MLE estimator with partial covariance matrix.
 """
-function partial_bspline_MLE_estim(X::AbstractMatrix{T}, sclrng::AbstractArray{Int}, v::Int; init::Real=0.5, mode::Symbol=:center) where {T<:Real}
+function partial_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractArray{Int}, v::Int; init::Real=0.5, mode::Symbol=:center) where {T<:Real}
     @assert size(X,1) == length(sclrng)
 
     func = h -> -partial_bspline_log_likelihood_H(X, sclrng, v, h; mode=mode)

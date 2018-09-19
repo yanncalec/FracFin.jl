@@ -597,6 +597,9 @@ end
 
 #### B-Spline wavelet analysis ####
 
+"""
+Maximum scale of B-Spline wavelet transform of `v` vanishing moments for a signal of length `N`.
+"""
 maxscale_bspline(N::Int, v::Int) = floor(Int, (N+1)/v/2)
 
 """
@@ -767,8 +770,8 @@ function IRLS(Y::Matrix{Float64}, X::Matrix{Float64}, pnorm::Real=2.; maxiter::I
             break
         end
     end
-    println(n)
-    println(err)
+    # println(n)
+    # println(err)
 
     return (A, β), w0, E, sum(sqrt.(sum(E.*E, dims=2)).^pnorm)
 end
