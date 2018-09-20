@@ -1,5 +1,17 @@
 ##### Algebra #####
 
+ifloor(x::Int, y::Int) = floor(Int, x/y) * y
+iceil(x::Int, y::Int) = ceil(Int, x/y) * y
+
+ifloor(x::Int, y::Int) = x - (x%y)
+
+# function make_rolling_data(X::AbstractVecOrMat{T}, w::Int) where {T<:Real}
+#     d::Int = ndims(X)>1 ? size(X,1) : 1
+#     Y = zeros(T, (w,size(X,)))
+#     view(X, :, 1)[]
+#     return reshape(X[:][1:ifloor(length(X), w*d)], w*d, :)
+# end
+
 function norm(X::AbstractMatrix, p::Real=2; dims::Int=1)
     if dims==1
         return [LinearAlgebra.norm(X[:,n],p) for n=1:size(X,2)]
@@ -598,6 +610,8 @@ end
 #### B-Spline wavelet analysis ####
 
 """
+    maxscale_bspline(N::Int, v::Int)
+
 Maximum scale of B-Spline wavelet transform of `v` vanishing moments for a signal of length `N`.
 """
 maxscale_bspline(N::Int, v::Int) = floor(Int, (N+1)/v/2)

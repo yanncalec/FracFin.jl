@@ -1,5 +1,52 @@
 # Estimators for fractional processes.
 
+#### Rolling window ####
+
+"""
+# Args
+- w: size of observation-window
+- d: length of decorrelation
+- n: number of observation-windows per estimator-window
+- p: period of application of estimator
+"""
+function rolling_estim(func::Function, X::AbstractVector{T}, w::Int, d::Int, n::Int, p::Int; mode::Symbol=:causal) where {T<:Real}
+    L = (n-1)*d + w  # size of estimator-window
+    res = []
+    if mode == :causal
+        for t = length(X):-p:1
+            xs = hcat([X[(t-i-w+1):(t-i)] for i in d*(n-1:-1:0) if t-i>=w]...)  # row dimension is one observation vector
+            if length(xs) > 0
+                pushfirst!(res, (t,func(xs)))
+            end
+        end
+        # return [func(X[n+widx]) for n=1:p:length(X) if n+widx[end]<length(X)]
+    else
+        for t = 1:p:length(X)-L+1
+            xs = hcat([X[(t+i):(t+i+w-1)] for i in d*(0:n-1) if t+i+w-1<=length(X)]...)
+            if length(xs) > 0
+                push!(res, (t,func(xs)))
+            end
+        end
+    end
+    return res
+end
+
+
+function rolling(func::Function, X::AbstractMatrix{T}, widx::AbstractArray{Int}, p::Int) where {T<:Real}
+    # wsize = w[end]-w[1]+1
+    # @assert wsize <= size(X,2)
+    return [func(X[:,n+widx]) for n=1:p:size(X,2) if n+widx[end]<size(X,2)]
+    # res = []
+    # for n=1:p:size(X,2)
+    #     idx = n+w
+    #     idx = idx[idx.<=size(X,2)]
+    #     push!(res, func(view(X, :,n+w)))
+    # end
+end
+
+
+######## Estimators for fBm ########
+
 """
 Power-law estimator for Hurst exponent and volatility.
 
@@ -52,7 +99,39 @@ function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, p::T=2.) whe
     return powlaw_estim(X, lags, [p])
 end
 
+
 ##### Generalized scalogram #####
+
+"""
+Scalogram estimator for Hurst exponent and volatility.
+
+# Args
+- X: matrix of wavelet coefficients. Each rwo corresponds to one scale.
+- sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one row in the matrix X
+- v: vanishing moments
+- r: rational ratio defining a line in the covariance matrix, e.g. r=1 corresponds to the main diagonal.
+"""
+function scalogram_estim(S::AbstractVector{T}, sclrng::AbstractArray{Int}, v::Int; mode::Symbol=:center) where {T<:Real}
+    @assert length(S) == length(sclrng)
+
+    df = DataFrames.DataFrame(X=log.(sclrng.^2), Y=log.(S))
+    ols = GLM.lm(@GLM.formula(Y~X), df)
+    coef = GLM.coef(ols)
+
+    hurst = coef[2]-1/2
+    # println(hurst)
+    C1 = C1rho(0, 1, hurst, v, mode)
+    σ = ℯ^((coef[1] - log(abs(C1)))/2)
+    return (hurst, σ), ols
+
+    # Ar = hcat(xr, ones(length(xr)))  # design matrix
+    # H0, η = Ar \ yr  # estimation of H and β
+    # hurst = H0-1/2
+    # C1 = C1rho(0, r, hurst, v, mode)
+    # σ = ℯ^((η - log(abs(C1)))/2)
+    # return hurst, σ
+end
+
 
 """
 Scalogram estimator for Hurst exponent and volatility.
@@ -141,6 +220,7 @@ end
 #     iA = pinv(A)
 #     return tr(X' * iA * X)
 # end
+
 
 """
 Safe evaluation of the log-likelihood of a fBm model with the implicit optimal volatility (in the MLE sense).
