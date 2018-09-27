@@ -92,7 +92,9 @@ include("SamplingGrid.jl")
 include("StochasticProcess.jl")
 include("Sampler.jl")
 
-include("Estimator.jl")
 include("Tool.jl")
+include("CHA.jl")
+include("Stat.jl")        
+include("Estimator.jl")
 
 end # module

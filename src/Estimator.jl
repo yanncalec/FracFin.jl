@@ -1,20 +1,31 @@
-# Estimators for fractional processes.
+######### Estimators for fractional processes #########
+
 
 #### Rolling window ####
 
 """
+Rolling window MLE estimation for scalar time series.
+
 # Args
+- func: estimator of MLE type
+- X: input, 1d array 
 - w: size of observation-window
-- d: length of decorrelation
+- d: length of decorrelation, no effect if `n==1`
 - n: number of observation-windows per estimator-window
-- p: period of application of estimator
+- p: step of estimator-window
+
+# Returns
+- array of estimations on the rolling window
+
+# Notes
+
 """
-function rolling_estim(func::Function, X::AbstractVector{T}, w::Int, d::Int, n::Int, p::Int; mode::Symbol=:causal) where {T<:Real}
+function rolling_MLE_estim(func::Function, X::AbstractVector{T}, w::Int, d::Int, n::Int, p::Int; mode::Symbol=:causal) where {T<:Real}
     L = (n-1)*d + w  # size of estimator-window
     res = []
     if mode == :causal
         for t = length(X):-p:1
-            xs = hcat([X[(t-i-w+1):(t-i)] for i in d*(n-1:-1:0) if t-i>=w]...)  # row dimension is one observation vector
+            xs = hcat([X[(t-i-w+1):(t-i)] for i in d*(n-1:-1:0) if t-i>=w]...)  # each row is one observation vector
             if length(xs) > 0
                 pushfirst!(res, (t,func(xs)))
             end
@@ -32,7 +43,7 @@ function rolling_estim(func::Function, X::AbstractVector{T}, w::Int, d::Int, n::
 end
 
 
-function rolling(func::Function, X::AbstractMatrix{T}, widx::AbstractArray{Int}, p::Int) where {T<:Real}
+function rolling_estim(func::Function, X::AbstractMatrix{T}, widx::AbstractArray{Int}, p::Int) where {T<:Real}
     # wsize = w[end]-w[1]+1
     # @assert wsize <= size(X,2)
     return [func(X[:,n+widx]) for n=1:p:size(X,2) if n+widx[end]<size(X,2)]
@@ -45,7 +56,31 @@ function rolling(func::Function, X::AbstractMatrix{T}, widx::AbstractArray{Int},
 end
 
 
+# function rolling_estim(fun::Function, X::AbstractVector{T}, wsize::Int, p::Int=1) where T
+#     offset = wsize-1
+#     res = [fun(view(X, (n*p):(n*p+wsize-1))) for n=1:p:N]
+#     end
+
+#     # y = fun(view(X, idx:idx+offset))  # test return type of fun
+#     res = Vector{typeof(y)}(undef, div(length(data)-offset, p))
+#     @inbounds for n=1:p:N
+#         push!(res, fun(view(X, (idx*p):(idx*p+offset))))
+#         end
+#     @inbounds for n in eachindex(res)
+#         res[n] = fun(hcat(X[idx*p:idx*p+offset]...))
+#     end
+
+#     return res
+# end
+
+
 ######## Estimators for fBm ########
+
+"""
+Compute the p-th moment of the increment of time-lag `d` of a 1d array.
+"""
+moment_incr(X,d,p) = mean((abs.(X[d+1:end] - X[1:end-d])).^p)
+
 
 """
 Power-law estimator for Hurst exponent and volatility.
@@ -53,50 +88,31 @@ Power-law estimator for Hurst exponent and volatility.
 # Args
 - X: sample path
 - lags: array of the increment step
-- pows: array of positive power
+- p: power
 
 # Returns
-- Y: a matrix that n-th column is the vector [log(E(|Δ_d(X)|^pows[n])) for d in lags]
-- ols: a dictionary of GLM objects, ols['h'] is the OLS for Hurst exponent and ols['σ'] is the OLS for log(σ * h^H)
-
-# Notes
-The intercepts in both OLS are supposed to be zero. To extract the estimation of H and σ, use
-the function `powlaw_coeff`.
+- (hurst, σ), ols: estimation of Hurst and volatility, as well as the GLM ols object.
 """
-function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, pows::AbstractArray{T}) where {T<:Real}
+function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, p::T=2.) where {T<:Real}
     @assert length(lags) > 1 && all(lags .> 1)
 
-    # Define the function for computing the p-th moment of the increment
-    moment_incr(X,d,p) = mean((abs.(X[d+1:end] - X[1:end-d])).^p)
+    C = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
 
-    # Estimation of Hurst exponent and β
-    H = zeros(Float64, length(pows))
-    β = zeros(Float64, length(pows))
-    C = zeros(Float64, length(pows))
+    yp = map(d -> log(moment_incr(X, d, p)), lags)
+    xp = p * log.(lags)
+    
+    # estimation of H and β
+    # by manual inversion
+    # Ap = hcat(xp, ones(length(xp))) # design matrix
+    # hurst, β = Ap \ yp
+    # or by GLM
+    dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
+    ols = GLM.lm(@GLM.formula(yvar ~ xvar), dg)
+    β, hurst = GLM.coef(ols)
 
-    for (n,p) in enumerate(pows)
-        C[n] = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
+    σ = exp((β-log(C))/p)
 
-        yp = map(d -> log(moment_incr(X, d, p)), lags)
-        xp = p * log.(lags)
-        Ap = hcat(xp, ones(length(xp)))  # design matrix
-        H[n], β[n] = Ap \ yp  # estimation of H and β
-
-        # dg = DataFrames.DataFrame(xvar=Ap, yvar=yp)
-        # ols = GLM.lm(@GLM.formula(yvar ~ xvar), dg)
-        # β[n], H[n] = GLM.coef(ols)
-    end
-
-    Σ = exp.((β-log.(C))./pows)
-
-    hurst = sum(H) / length(H)
-    σ = sum(Σ) / length(Σ)
-
-    return hurst, σ
-end
-
-function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, p::T=2.) where {T<:Real}
-    return powlaw_estim(X, lags, [p])
+    return (hurst, σ), ols
 end
 
 
@@ -106,10 +122,9 @@ end
 Scalogram estimator for Hurst exponent and volatility.
 
 # Args
-- X: matrix of wavelet coefficients. Each rwo corresponds to one scale.
+- S: vector of scalogram, ie, variance of the wavelet coefficients per scale
 - sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one row in the matrix X
 - v: vanishing moments
-- r: rational ratio defining a line in the covariance matrix, e.g. r=1 corresponds to the main diagonal.
 """
 function scalogram_estim(S::AbstractVector{T}, sclrng::AbstractArray{Int}, v::Int; mode::Symbol=:center) where {T<:Real}
     @assert length(S) == length(sclrng)
@@ -121,7 +136,7 @@ function scalogram_estim(S::AbstractVector{T}, sclrng::AbstractArray{Int}, v::In
     hurst = coef[2]-1/2
     # println(hurst)
     C1 = C1rho(0, 1, hurst, v, mode)
-    σ = ℯ^((coef[1] - log(abs(C1)))/2)
+    σ = exp((coef[1] - log(abs(C1)))/2)
     return (hurst, σ), ols
 
     # Ar = hcat(xr, ones(length(xr)))  # design matrix
@@ -134,7 +149,7 @@ end
 
 
 """
-Scalogram estimator for Hurst exponent and volatility.
+Generalized scalogram estimator for Hurst exponent and volatility.
 
 # Args
 - X: matrix of wavelet coefficients. Each rwo corresponds to one scale.
@@ -164,7 +179,7 @@ function scalogram_estim(X::AbstractMatrix{T}, sclrng::AbstractArray{Int}, v::In
     hurst = coef[2]-1/2
     # println(hurst)
     C1 = C1rho(0, r, hurst, v, mode)
-    σ = ℯ^((coef[1] - log(abs(C1)))/2)
+    σ = exp((coef[1] - log(abs(C1)))/2)
     return (hurst, σ), ols
 
     # Ar = hcat(xr, ones(length(xr)))  # design matrix
@@ -176,25 +191,30 @@ function scalogram_estim(X::AbstractMatrix{T}, sclrng::AbstractArray{Int}, v::In
 end
 
 
-# function rolling_estim(fun::Function, X::AbstractVector{T}, wsize::Int, p::Int=1) where T
-#     offset = wsize-1
-#     res = [fun(view(X, (n*p):(n*p+wsize-1))) for n=1:p:N]
-#     end
+##### MLE #####
 
-#     # y = fun(view(X, idx:idx+offset))  # test return type of fun
-#     res = Vector{typeof(y)}(undef, div(length(data)-offset, p))
-#     @inbounds for n=1:p:N
-#         push!(res, fun(view(X, (idx*p):(idx*p+offset))))
-#         end
-#     @inbounds for n in eachindex(res)
-#         res[n] = fun(hcat(X[idx*p:idx*p+offset]...))
-#     end
+# abstract type Estimator end
 
-#     return res
+# abstract type MaximumLikelihoodEstimator <: Estimator end
+# const MLE = MaximumLikelihoodEstimator
+
+# struct fGnMLE <: MLE
+# end
+
+# struct WaveletMLE <: MLE
 # end
 
 
-##### MLE #####
+# function estim(E::Estimator, X::AbstractVecOrMat)
+#     nothing
+# end
+
+
+# function estim(E::MaximumLikelihoodEstimator, X::AbstractVecOrMat, wobs::Int, dlen::Int)
+#     nothing
+# end
+
+
 
 """
 Safe evaluation of the inverse quadratic form
@@ -233,7 +253,7 @@ The value of log-likelihood (up to some additif constant) is
 - X: vector of matrix of observation
 
 # Notes
-This function is common to all MLE problems with the covariance matrix of form σ²A(θ), with unknown σ and θ. Such kind of MLE can be done in θ uniquely.
+- This function is common to all MLEs with the covariance matrix of form σ²A(h), where {σ, h} are unknown parameters. This kind of MLE can be carried out in h uniquely and σ is obtained from h.
 """
 function log_likelihood_H(A::AbstractMatrix{T}, X::AbstractVecOrMat{T}, ε::Real=0) where {T<:Real}
     @assert issymmetric(A)
@@ -323,8 +343,8 @@ function full_bspline_log_likelihood_H(X::AbstractVecOrMat{T}, sclrng::AbstractA
     @assert 0 < H < 1
     @assert size(X,1) % length(sclrng) == 0
 
-    L = size(X,1) ÷ length(sclrng)  # interger division: \div
-    N = ndims(X)>1 ? size(X,2) : 1
+    L = size(X,1) ÷ length(sclrng)  # integer division: \div
+    # N = ndims(X)>1 ? size(X,2) : 1
 
     Σ = full_bspline_covmat(L-1, sclrng, v, H, mode)  # full covariance matrix
 
@@ -342,8 +362,8 @@ B-Spline wavelet-MLE estimator with full covariance matrix.
 function full_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractArray{Int}, v::Int; init::Real=0.5, ε::Real=1e-3, mode::Symbol=:center) where {T<:Real}
     @assert size(X,1) % length(sclrng) == 0
 
-    L = size(X,1) ÷ length(sclrng)  # interger division: \div
-    N = ndims(X)>1 ? size(X,2) : 1
+    L = size(X,1) ÷ length(sclrng)  # integer division: \div
+    # N = ndims(X)>1 ? size(X,2) : 1
 
     func = x -> -full_bspline_log_likelihood_H(X, sclrng, v, x[1], mode)
 

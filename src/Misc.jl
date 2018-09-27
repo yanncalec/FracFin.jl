@@ -19,6 +19,39 @@
 #     return hurst_estim, ols_hurst
 # end
 
+function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, pows::AbstractArray{T}) where {T<:Real}
+    @assert length(lags) > 1 && all(lags .> 1)
+
+    # Define the function for computing the p-th moment of the increment
+    moment_incr(X,d,p) = mean((abs.(X[d+1:end] - X[1:end-d])).^p)
+
+    # Estimation of Hurst exponent and β
+    H = zeros(Float64, length(pows))
+    β = zeros(Float64, length(pows))
+    C = zeros(Float64, length(pows))
+
+    for (n,p) in enumerate(pows)
+        powlaw_estim()
+        C[n] = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
+
+        yp = map(d -> log(moment_incr(X, d, p)), lags)
+        xp = p * log.(lags)
+        Ap = hcat(xp, ones(length(xp)))  # design matrix
+        H[n], β[n] = Ap \ yp  # estimation of H and β
+
+        # dg = DataFrames.DataFrame(xvar=Ap, yvar=yp)
+        # ols = GLM.lm(@GLM.formula(yvar ~ xvar), dg)
+        # β[n], H[n] = GLM.coef(ols)
+    end
+
+    Σ = exp.((β-log.(C))./pows)
+
+    hurst = sum(H) / length(H)
+    σ = sum(Σ) / length(Σ)
+
+    return hurst, σ
+end
+
 
 function powlaw_estim_old(X::Vector{Float64}, lags::AbstractArray{Int}, pows::AbstractArray{T}) where {T<:Real}
     # Define the function for computing the p-th moment of the increment
