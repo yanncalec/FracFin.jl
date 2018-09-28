@@ -533,7 +533,7 @@ function diff_Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; r
 end
 
 """
-Evaluate G-matrix in DCWT
+Evaluate for B-Spline DCWT the matrix `C1_ρ()`
 
 # Notes
 - The true scale is two times the scale index due to the special implementation of B-Spline wavelet, see also `_intscale_bspline_filter()`.
@@ -541,9 +541,10 @@ Evaluate G-matrix in DCWT
 # TODO
 - parallelization
 """
-function Gmat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractArray{Int}, mode::Symbol)
+function Cmat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractArray{Int}, mode::Symbol)
     all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
-    return [Gfunc_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
+    C = ## TODO
+    [C1rho(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
 end
 
 """

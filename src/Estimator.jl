@@ -259,8 +259,8 @@ The value of log-likelihood (up to some additif constant) is
     -1/2 * (N*log(X'*inv(A)*X) + logdet(A))
 
 # Args
-- A: covariance matrix, must be symmetric and positive definite
-- X: vector of matrix of observation
+- A: covariance matrix
+- X: vector of matrix of observation. For matrix input the columns are i.i.d. observations.
 
 # Notes
 - This function is common to all MLEs with the covariance matrix of form σ²A(h), where {σ, h} are unknown parameters. This kind of MLE can be carried out in h uniquely and σ is obtained from h.
@@ -269,14 +269,16 @@ function log_likelihood_H(A::AbstractMatrix{T}, X::AbstractVecOrMat{T}, ε::Real
     @assert issymmetric(A)
     @assert size(X, 1) == size(A, 1)
 
-    N = ndims(X)>1 ? size(X,2) : 1
-    # d = size(X,1), such that N*d == length(X)
+    N = ndims(X)>1 ? size(X,2) : 1  # number of i.i.d. samples in data
+    # d = size(X,1)  # such that N*d == length(X)
 
     S, U = eigen(A)  # so that U * Diagonal(S) * inv(U) == A, in particular, U' == inv(U)
     idx = (S .> ε)
     # U, S, V = svd(A)
     # idx = S .> ε
-    return -1/2 * (length(X)*log(sum((U[:,idx]'*X).^2 ./ S[idx])) + N*sum(log.(S[idx])))
+
+    val = -1/2 * (length(X)*log(sum((U[:,idx]'*X).^2 ./ S[idx])) + N*sum(log.(S[idx])))  # non-constant part of log-likelihood
+    return val - length(X)*log(2π*ℯ/length(X))/2  # with the constant part
 end
 
 # function log_likelihood_H(A::AbstractMatrix{T}, X::AbstractVecOrMat{T}, ε::Real=0) where {T<:Real}
@@ -296,19 +298,21 @@ function fGn_log_likelihood_H(X::AbstractVecOrMat{T}, H::Real) where {T<:Real}
     return log_likelihood_H(Σ, X)
 end
 
+
 """
-fGn-MLE of Hurst exponent and volatility.
+Maximum likelihood estimation of Hurst exponent and volatility using fractional Gaussian noise model.
 
 # Args
-- X: observation vector or matrix. For matrix input each column is an i.i.d. observation.
+- X: observation vector or matrix of a fGn process. For matrix input each column is an i.i.d. observation.
 - method: :optim for optimization based or :table for look-up table based solution.
 - ε: this defines the bounded constraint [ε, 1-ε], and for method==:table this is also the step of search for Hurst exponent.
 
 # Notes
-- This method is computationally expensive for long observations (say, >= 500 points). In this case the 1d data should be divided into i.i.d. short observations and put into a matrix format. 
+- This method is computationally expensive for long observations (say, >= 500 points). 
+- The input `X` can be either a vector, e.g. a sample trajectory of a fGn process, or a matrix of i.i.d. observations obtained from the fGn process by concatenating short vectors. 
 """
 function fGn_MLE_estim(X::AbstractVecOrMat{T}; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
-    # @assert 0. < ε < 1. && Nh >= 1
+    # @assert 0. < ε < 1.
     func = h -> -fGn_log_likelihood_H(X, h)
 
     opm = nothing
@@ -335,13 +339,6 @@ function fGn_MLE_estim(X::AbstractVecOrMat{T}; method::Symbol=:optim, ε::Real=1
     return (hurst, σ), opm
 end
 
-
-function fGn_MLL_estim(X::AbstractVecOrMat{T}; ε::Real=0.01) where {T<:Real}
-    @assert 0. < ε < 1.
-    func = h -> -fGn_log_likelihood_H(X, h)
-    L = [func(X, h) for h in ε:ε:1-ε]
-    
-end
 
 ##### Wavelet-MLE #####
 
@@ -384,7 +381,7 @@ function fBm_bspline_log_likelihood_H(X::AbstractVecOrMat{T}, sclrng::AbstractAr
     L = size(X,1) ÷ length(sclrng)  # integer division: \div
     # N = ndims(X)>1 ? size(X,2) : 1
 
-    Σ = full_bspline_covmat(L-1, sclrng, v, H, mode)  # full covariance matrix
+    Σ = fBm_bspline_covmat(L-1, sclrng, v, H, mode)  # full covariance matrix
 
     # # strangely, the following does not work (logarithm of a negative value)
     # iΣ = pinv(Σ)  # regularization by pseudo-inverse
@@ -396,14 +393,22 @@ end
 
 """
 B-Spline wavelet-MLE estimator.
+
+# Args
+- `X`: 
+# Returns
+
+# Notes
+- `X`
 """
-function fBm_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractArray{Int}, v::Int; init::Real=0.5, ε::Real=1e-3, mode::Symbol=:center) where {T<:Real}
+function fBm_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractArray{Int}, v::Int; method::Symbol=:optim, ε::Real=1e-2, mode::Symbol=:center) where {T<:Real}
     @assert size(X,1) % length(sclrng) == 0
 
+    # number of wavelet coefficient vectors concatenated into one column of X
     L = size(X,1) ÷ length(sclrng)  # integer division: \div
     # N = ndims(X)>1 ? size(X,2) : 1
 
-    func = x -> -full_bspline_log_likelihood_H(X, sclrng, v, x[1], mode)
+    func = x -> -fBm_bspline_log_likelihood_H(X, sclrng, v, x[1], mode)
 
     # # Gradient based
     # # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
@@ -417,7 +422,7 @@ function fBm_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractArray{Int
 
     hurst = Optim.minimizer(opm)[1]
 
-    Σ = full_bspline_covmat(L-1, sclrng, v, hurst, mode)
+    Σ = fBm_bspline_covmat(L-1, sclrng, v, hurst, mode)
     σ = sqrt(xiAx(Σ, X) / length(X))
 
     return (hurst, σ), opm
