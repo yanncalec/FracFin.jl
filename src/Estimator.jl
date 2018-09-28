@@ -4,36 +4,36 @@
 #### Rolling window ####
 
 """
-Rolling window MLE estimation for scalar time series.
+Rolling window estimator for 1d or multivariate time series.
 
 # Args
-- func: estimator of MLE type
-- X: input, 1d array 
-- w: size of observation-window
-- d: length of decorrelation, no effect if `n==1`
-- n: number of observation-windows per estimator-window
-- p: step of estimator-window
+- func: estimator
+- X0: input, 1d or 2d array with each column being one observation
+- p: step of the rolling window
+- (w,d,n): size of sample vector; length of decorrelation (no effect if `n==1`); number of sample vectors per window
 
 # Returns
 - array of estimations on the rolling window
 
 # Notes
-
+The estimator is applied on a rolling window every `p` steps. The rolling window is divided into `n` (possibly overlapping) sub-windows of size `w` at the pace `d`, such that the size of the rolling window equals to `(n-1)*d+w`. In this way the data on a rolling window is put into a new matrix of dimension `w*q`-by-`n` for q-variates time series, and its columns are the column-concatenantions of data on the sub-window. Moreover, different columns of this new matrix are assumed as i.i.d. observations.
 """
-function rolling_MLE_estim(func::Function, X::AbstractVector{T}, w::Int, d::Int, n::Int, p::Int; mode::Symbol=:causal) where {T<:Real}
-    L = (n-1)*d + w  # size of estimator-window
+function rolling_estim(func::Function, X0::AbstractVecOrMat{T}, p::Int, (w,d,n)::Tuple{Int,Int,Int}; mode::Symbol=:causal) where {T<:Real}
+    L = (n-1)*d + w  # size of rolling window
     res = []
+    X = reshape(X0, ndims(X0)>1 ? size(X0,1) : 1, :)  # vec to matrix, create a reference not a copy
+    
     if mode == :causal
-        for t = length(X):-p:1
-            xs = hcat([X[(t-i-w+1):(t-i)] for i in d*(n-1:-1:0) if t-i>=w]...)  # each row is one observation vector
+        for t = size(X,2):-p:1
+            xs = hcat([X[:,(t-i-w+1):(t-i)][:] for i in d*(n-1:-1:0) if t-i>=w]...)  # X[:] creates a copy
             if length(xs) > 0
                 pushfirst!(res, (t,func(xs)))
             end
         end
         # return [func(X[n+widx]) for n=1:p:length(X) if n+widx[end]<length(X)]
     else
-        for t = 1:p:length(X)-L+1
-            xs = hcat([X[(t+i):(t+i+w-1)] for i in d*(0:n-1) if t+i+w-1<=length(X)]...)
+        for t = 1:p:size(X,2)-L+1
+            xs = hcat([X[:, (t+i):(t+i+w-1)][:] for i in d*(0:n-1) if t+i+w-1<=length(X)]...)
             if length(xs) > 0
                 push!(res, (t,func(xs)))
             end
@@ -43,17 +43,17 @@ function rolling_MLE_estim(func::Function, X::AbstractVector{T}, w::Int, d::Int,
 end
 
 
-function rolling_estim(func::Function, X::AbstractMatrix{T}, widx::AbstractArray{Int}, p::Int) where {T<:Real}
-    # wsize = w[end]-w[1]+1
-    # @assert wsize <= size(X,2)
-    return [func(X[:,n+widx]) for n=1:p:size(X,2) if n+widx[end]<size(X,2)]
-    # res = []
-    # for n=1:p:size(X,2)
-    #     idx = n+w
-    #     idx = idx[idx.<=size(X,2)]
-    #     push!(res, func(view(X, :,n+w)))
-    # end
-end
+# function rolling_estim(func::Function, X::AbstractMatrix{T}, widx::AbstractArray{Int}, p::Int) where {T<:Real}
+#     # wsize = w[end]-w[1]+1
+#     # @assert wsize <= size(X,2)
+#     return [func(X[:,n+widx]) for n=1:p:size(X,2) if n+widx[end]<size(X,2)]
+#     # res = []
+#     # for n=1:p:size(X,2)
+#     #     idx = n+w
+#     #     idx = idx[idx.<=size(X,2)]
+#     #     push!(res, func(view(X, :,n+w)))
+#     # end
+# end
 
 
 # function rolling_estim(fun::Function, X::AbstractVector{T}, wsize::Int, p::Int=1) where T
@@ -93,7 +93,7 @@ Power-law estimator for Hurst exponent and volatility.
 # Returns
 - (hurst, σ), ols: estimation of Hurst and volatility, as well as the GLM ols object.
 """
-function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, p::T=2.) where {T<:Real}
+function fBm_powlaw_estim(X::AbstractVector{T}, lags::AbstractArray{Int}, p::T=2.) where {T<:Real}
     @assert length(lags) > 1 && all(lags .> 1)
 
     C = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
@@ -107,7 +107,7 @@ function powlaw_estim(X::Vector{Float64}, lags::AbstractArray{Int}, p::T=2.) whe
     # hurst, β = Ap \ yp
     # or by GLM
     dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
-    ols = GLM.lm(@GLM.formula(yvar ~ xvar), dg)
+    ols = GLM.lm(@GLM.formula(yvar~xvar), dg)
     β, hurst = GLM.coef(ols)
 
     σ = exp((β-log(C))/p)
@@ -119,18 +119,18 @@ end
 ##### Generalized scalogram #####
 
 """
-Scalogram estimator for Hurst exponent and volatility.
+B-Spline scalogram estimator for Hurst exponent and volatility.
 
 # Args
-- S: vector of scalogram, ie, variance of the wavelet coefficients per scale
+- S: vector of scalogram, ie, variance of the wavelet coefficients per scale.
 - sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one row in the matrix X
 - v: vanishing moments
 """
-function scalogram_estim(S::AbstractVector{T}, sclrng::AbstractArray{Int}, v::Int; mode::Symbol=:center) where {T<:Real}
+function fBm_bspline_scalogram_estim(S::AbstractVector{T}, sclrng::AbstractArray{Int}, v::Int; mode::Symbol=:center) where {T<:Real}
     @assert length(S) == length(sclrng)
 
-    df = DataFrames.DataFrame(X=log.(sclrng.^2), Y=log.(S))
-    ols = GLM.lm(@GLM.formula(Y~X), df)
+    df = DataFrames.DataFrame(xvar=log.(sclrng.^2), yvar=log.(S))
+    ols = GLM.lm(@GLM.formula(yvar~xvar), df)
     coef = GLM.coef(ols)
 
     hurst = coef[2]-1/2
@@ -147,18 +147,26 @@ function scalogram_estim(S::AbstractVector{T}, sclrng::AbstractArray{Int}, v::In
     # return hurst, σ
 end
 
+function fBm_bspline_scalogram_estim(W::AbstractMatrix{T}, sclrng::AbstractArray{Int}, v::Int; dims::Int=1, mode::Symbol=:center) where {T<:Real}
+    return fBm_bspline_scalogram_estim(var(W,dims), sclrng, v; mode=mode)        
+end
+
+function fBm_bspline_scalogram_estim(W::AbstractVector{T}, sclrng::AbstractArray{Int}, v::Int; mode::Symbol=:center) where {T<:AbstractVector{<:Real}}
+    return fBm_bspline_scalogram_estim([var(w) for w in W], sclrng, v; mode=mode)
+end
 
 """
-Generalized scalogram estimator for Hurst exponent and volatility.
+Generalized B-Spline scalogram estimator for Hurst exponent and volatility.
 
 # Args
-- X: matrix of wavelet coefficients. Each rwo corresponds to one scale.
+- Σ: covariance matrix of wavelet coefficients.
 - sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one row in the matrix X
 - v: vanishing moments
 - r: rational ratio defining a line in the covariance matrix, e.g. r=1 corresponds to the main diagonal.
 """
-function scalogram_estim(X::AbstractMatrix{T}, sclrng::AbstractArray{Int}, v::Int, r::Rational=1//1; mode::Symbol=:center) where {T<:Real}
-    @assert size(X,1) == length(sclrng)
+function fBm_gen_bspline_scalogram_estim(Σ::AbstractMatrix{T}, sclrng::AbstractArray{Int}, v::Int, r::Rational=1//1; mode::Symbol=:center) where {T<:Real}
+    @assert issymmetric(Σ)
+    @assert size(Σ,1) == length(sclrng)
     @assert r >= 1
     if r > 1
         all(diff(sclrng/sclrng[1]) .== 1) || error("Imcompatible scales: the ratio between the k-th and the 1st scale must be k")
@@ -167,13 +175,13 @@ function scalogram_estim(X::AbstractMatrix{T}, sclrng::AbstractArray{Int}, v::In
     p,q,N = r.num, r.den, length(sclrng)
     @assert N>=2p
 
-    Σ = cov(X, X, dims=2, corrected=true)  # covariance matrix
+    # Σ = cov(X, X, dims=2, corrected=true)  # covariance matrix
 
     yr = [log(abs(Σ[q*j, p*j])) for j in 1:N if p*j<=N]
     xr = [log(sclrng[q*j] * sclrng[p*j]) for j in 1:N if p*j<=N]
 
-    df = DataFrames.DataFrame(X=xr, Y=yr)
-    ols = GLM.lm(@GLM.formula(Y~X), df)
+    df = DataFrames.DataFrame(xvar=xr, yvar=yr)
+    ols = GLM.lm(@GLM.formula(yvar~xvar), df)
     coef = GLM.coef(ols)
 
     hurst = coef[2]-1/2
@@ -189,6 +197,8 @@ function scalogram_estim(X::AbstractMatrix{T}, sclrng::AbstractArray{Int}, v::In
     # σ = ℯ^((η - log(abs(C1)))/2)
     # return hurst, σ
 end
+
+
 
 
 ##### MLE #####
@@ -286,18 +296,39 @@ function fGn_log_likelihood_H(X::AbstractVecOrMat{T}, H::Real) where {T<:Real}
     return log_likelihood_H(Σ, X)
 end
 
+"""
+fGn-MLE of Hurst exponent and volatility.
 
-function fGn_MLE_estim(X::AbstractVecOrMat{T}; init::Real=0.5) where {T<:Real}
+# Args
+- X: observation vector or matrix. For matrix input each column is an i.i.d. observation.
+- method: :optim for optimization based or :table for look-up table based solution.
+- ε: this defines the bounded constraint [ε, 1-ε], and for method==:table this is also the step of search for Hurst exponent.
+
+# Notes
+- This method is computationally expensive for long observations (say, >= 500 points). In this case the 1d data should be divided into i.i.d. short observations and put into a matrix format. 
+"""
+function fGn_MLE_estim(X::AbstractVecOrMat{T}; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
+    # @assert 0. < ε < 1. && Nh >= 1
     func = h -> -fGn_log_likelihood_H(X, h)
 
-    ε = 1e-5
-    # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
-    # optimizer = Optim.BFGS()
-    # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
-    opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+    opm = nothing
+    hurst = nothing
 
-    hurst = Optim.minimizer(opm)[1]
-
+    if method == :optim
+        # Gradient-free constrained optimization
+        opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+        # # Gradient-based optimization
+        # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+        # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+        hurst = Optim.minimizer(opm)[1]
+    elseif method == :table    
+        Hs = collect(ε:ε:1-ε)
+        L = [func(h) for h in Hs]
+        hurst = Hs[argmin(L)]
+    else
+        throw("Unknown method: ", method)
+    end
+    
     Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(hurst, 1.), size(X,1))))
     σ = sqrt(xiAx(Σ, X) / length(X))
 
@@ -305,10 +336,17 @@ function fGn_MLE_estim(X::AbstractVecOrMat{T}; init::Real=0.5) where {T<:Real}
 end
 
 
+function fGn_MLL_estim(X::AbstractVecOrMat{T}; ε::Real=0.01) where {T<:Real}
+    @assert 0. < ε < 1.
+    func = h -> -fGn_log_likelihood_H(X, h)
+    L = [func(X, h) for h in ε:ε:1-ε]
+    
+end
+
 ##### Wavelet-MLE #####
 
 """
-Compute the full covariance matrix of DCWT coefficients of a pure fBm with B-Spline wavelet.
+Compute the covariance matrix of B-Spline DCWT coefficients of a pure fBm.
 
 The full covariance matrix of `J`-scale transform and of time-lag `N` is a N*J-by-N*J symmetric matrix.
 
@@ -319,7 +357,7 @@ The full covariance matrix of `J`-scale transform and of time-lag `N` is a N*J-b
 - H: Hurst exponent
 - mode: mode of convolution
 """
-function full_bspline_covmat(l::Int, sclrng::AbstractArray{Int}, v::Int, H::Real, mode::Symbol)
+function fBm_bspline_covmat(l::Int, sclrng::AbstractArray{Int}, v::Int, H::Real, mode::Symbol)
     J = length(sclrng)
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
     Σs = [[C1rho(d/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng] .* A for d = 0:l]
@@ -337,9 +375,9 @@ end
 
 
 """
-Evaluate the log-likelihood of DCWT coefficients of B-Spline wavelet with full covariance matrix.
+Evaluate the log-likelihood of B-Spline DCWT coefficients.
 """
-function full_bspline_log_likelihood_H(X::AbstractVecOrMat{T}, sclrng::AbstractArray{Int}, v::Int, H::Real, mode::Symbol) where {T<:Real}
+function fBm_bspline_log_likelihood_H(X::AbstractVecOrMat{T}, sclrng::AbstractArray{Int}, v::Int, H::Real, mode::Symbol) where {T<:Real}
     @assert 0 < H < 1
     @assert size(X,1) % length(sclrng) == 0
 
@@ -357,9 +395,9 @@ end
 
 
 """
-B-Spline wavelet-MLE estimator with full covariance matrix.
+B-Spline wavelet-MLE estimator.
 """
-function full_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractArray{Int}, v::Int; init::Real=0.5, ε::Real=1e-3, mode::Symbol=:center) where {T<:Real}
+function fBm_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractArray{Int}, v::Int; init::Real=0.5, ε::Real=1e-3, mode::Symbol=:center) where {T<:Real}
     @assert size(X,1) % length(sclrng) == 0
 
     L = size(X,1) ÷ length(sclrng)  # integer division: \div

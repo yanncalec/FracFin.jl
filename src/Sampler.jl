@@ -19,11 +19,13 @@ Sampler for discrete time stochastic process (time-series).
 """
 const DiscreteTimeSampler{P, G} = Sampler{DiscreteTime, P, G}
 
+
 """
 Random sampling function for an initialized sampler.
 """
 rand!(x::Vector{Float64}, s::Sampler) = throw(NotImplementedError("rand!(::Vector{Float64}, ::$(typeof(s)))"))
 rand(s::Sampler) = rand!(zeros(Float64, length(s)), s)
+
 
 """
 Random sampling function for a process of increment.
@@ -36,6 +38,7 @@ function rand(::Type{R}, s::Sampler{DiscreteTime, <:IncrementProcess{DiscreteTim
     end
 end
 
+
 """
 Random sampling function with on-the-fly implementation.
 """
@@ -47,6 +50,7 @@ size(s::Sampler) = size(s.grid,)
 
 # The convert function is implicitly called by `new()` in the constructor of a sampler
 # convert(::Type{S}, s::Sampler) where {S<:Sampler} = S(s.proc, s.grid)
+
 
 """
     init_sampler_fGn(H::Float64, N::Integer, name::String)
@@ -90,6 +94,7 @@ function init_sampler_fGn(H::Float64, N::Integer, name::String)
 
     return sampler
 end
+
 
 """
     rand_fGn(sampler::Sampler, Tmax::Real=1.)
@@ -155,6 +160,7 @@ function init_sampler_fBm(H::Float64, N::Integer, name::String)
 
     return sampler
 end
+
 
 """
     rand_fBm(sampler::Sampler, Tmax::Real=1.)
