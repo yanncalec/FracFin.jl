@@ -152,4 +152,17 @@ Derivative of sigmoid function.
 diff_sigmoid(α::Real) = exp(α)/(1+2*exp(α)+exp(2α))
 
 
-
+"""
+Remove singular dimensions
+"""
+function squeeze(A::AbstractArray)
+    nd = size(A)    
+    for (n,d) in enumerate(nd)
+        if d==1
+            A = dropdims(A,dims=n)
+        end
+    end
+    return A
+end
+    
+    

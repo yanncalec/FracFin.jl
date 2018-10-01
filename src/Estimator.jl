@@ -4,44 +4,53 @@
 #### Rolling window ####
 
 """
+    rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, p::Int, (w,d,n)::Tuple{Int,Int,Int}, trans::Function=(x->vec(x)); mode::Symbol=:causal) where {T<:Real}
+
 Rolling window estimator for 1d or multivariate time series.
 
 # Args
-- func: estimator
+- estim: estimator
 - X0: input, 1d or 2d array with each column being one observation
 - p: step of the rolling window
-- (w,d,n): size of sample vector; length of decorrelation (no effect if `n==1`); number of sample vectors per window
+- (w,d,n): size of sub-window; length of decorrelation (no effect if `n==1`); number of sub-windows per rolling window
+- trans: function of transformation, optional
 
 # Returns
 - array of estimations on the rolling window
 
 # Notes
-The estimator is applied on a rolling window every `p` steps. The rolling window is divided into `n` (possibly overlapping) sub-windows of size `w` at the pace `d`, such that the size of the rolling window equals to `(n-1)*d+w`. In this way the data on a rolling window is put into a new matrix of dimension `w*q`-by-`n` for q-variates time series, and its columns are the column-concatenantions of data on the sub-window. Moreover, different columns of this new matrix are assumed as i.i.d. observations.
+The estimator is applied on a rolling window every `p` steps. The rolling window is divided into `n` (possibly overlapping) sub-windows of size `w` at the pace `d`, such that the size of the rolling window equals to `(n-1)*d+w`. For q-variates time series, data on a sub-window is a matrix of dimension `q`-by-`w` which is further transformed by the function `trans` into another vector. The transformed vectors of `n` sub-windows are concatenated into a matrix which is finally passed to the estimator `estim`. 
+
+As example, for `trans = x -> vec(x)` the data on a rolling window is put into a new matrix of dimension `w*q`-by-`n`, and its columns are the column-concatenantions of data on the sub-window. Moreover, different columns of this new matrix are assumed as i.i.d. observations.
 """
-function rolling_estim(func::Function, X0::AbstractVecOrMat{T}, p::Int, (w,d,n)::Tuple{Int,Int,Int}; mode::Symbol=:causal) where {T<:Real}
+function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, p::Int, (w,d,n)::Tuple{Int,Int,Int}, trans::Function=(x->vec(x)); mode::Symbol=:causal) where {T<:Real}
     L = (n-1)*d + w  # size of rolling window
     res = []
     X = reshape(X0, ndims(X0)>1 ? size(X0,1) : 1, :)  # vec to matrix, create a reference not a copy
     
     if mode == :causal
         for t = size(X,2):-p:1
-            xs = hcat([X[:,(t-i-w+1):(t-i)][:] for i in d*(n-1:-1:0) if t-i>=w]...)  # X[:] creates a copy
+            xs = hcat([trans(X[:,(t-i-w+1):(t-i)]) for i in d*(n-1:-1:0) if t-i>=w]...) # concatenation of column vectors
             if length(xs) > 0
-                pushfirst!(res, (t,func(xs)))
+                pushfirst!(res, (t,estim(squeeze(xs))))
             end
         end
         # return [func(X[n+widx]) for n=1:p:length(X) if n+widx[end]<length(X)]
     else
         for t = 1:p:size(X,2)-L+1
-            xs = hcat([X[:, (t+i):(t+i+w-1)][:] for i in d*(0:n-1) if t+i+w-1<=length(X)]...)
+            xs = hcat([trans(X[:, (t+i):(t+i+w-1)]) for i in d*(0:n-1) if t+i+w-1<=length(X)]...)
             if length(xs) > 0
-                push!(res, (t,func(xs)))
+                push!(res, (t,estim(squeeze(xs))))
             end
         end
     end
     return res
 end
 
+
+function rolling_estim(func::Function, X0::AbstractVecOrMat{T}, p::Int, w::Int, trans::Function=(x->x); mode::Symbol=:causal) where {T<:Real}
+    return rolling_estim(func, X0, p, (w,1,1), trans; mode=mode)
+end
 
 # function rolling_estim(func::Function, X::AbstractMatrix{T}, widx::AbstractArray{Int}, p::Int) where {T<:Real}
 #     # wsize = w[end]-w[1]+1
@@ -80,7 +89,6 @@ end
 Compute the p-th moment of the increment of time-lag `d` of a 1d array.
 """
 moment_incr(X,d,p) = mean((abs.(X[d+1:end] - X[1:end-d])).^p)
-
 
 """
 Power-law estimator for Hurst exponent and volatility.
@@ -134,7 +142,6 @@ function fBm_bspline_scalogram_estim(S::AbstractVector{T}, sclrng::AbstractArray
     coef = GLM.coef(ols)
 
     hurst = coef[2]-1/2
-    # println(hurst)
     C1 = C1rho(0, 1, hurst, v, mode)
     σ = exp((coef[1] - log(abs(C1)))/2)
     return (hurst, σ), ols
@@ -143,12 +150,12 @@ function fBm_bspline_scalogram_estim(S::AbstractVector{T}, sclrng::AbstractArray
     # H0, η = Ar \ yr  # estimation of H and β
     # hurst = H0-1/2
     # C1 = C1rho(0, r, hurst, v, mode)
-    # σ = ℯ^((η - log(abs(C1)))/2)
+    # σ = exp((η - log(abs(C1)))/2)
     # return hurst, σ
 end
 
 function fBm_bspline_scalogram_estim(W::AbstractMatrix{T}, sclrng::AbstractArray{Int}, v::Int; dims::Int=1, mode::Symbol=:center) where {T<:Real}
-    return fBm_bspline_scalogram_estim(var(W,dims), sclrng, v; mode=mode)        
+    return fBm_bspline_scalogram_estim(var(W,dims), sclrng, v; mode=mode)
 end
 
 function fBm_bspline_scalogram_estim(W::AbstractVector{T}, sclrng::AbstractArray{Int}, v::Int; mode::Symbol=:center) where {T<:AbstractVector{<:Real}}
@@ -199,8 +206,6 @@ function fBm_gen_bspline_scalogram_estim(Σ::AbstractMatrix{T}, sclrng::Abstract
 end
 
 
-
-
 ##### MLE #####
 
 # abstract type Estimator end
@@ -241,15 +246,10 @@ function xiAx(A::AbstractMatrix{T}, X::AbstractVecOrMat{T}, ε::Real=0) where {T
     # U, S, V = svd(A)
     # idx = S .> ε
     return sum((U[:,idx]'*X).^2 ./ S[idx])
+
+    #     iA = pinv(A)
+    #     return tr(X' * iA * X)
 end
-
-# function xiAx(A::AbstractMatrix{T}, X::AbstractVecOrMat{T}, ε::Real=0) where {T<:Real}
-#     @assert issymmetric(A)
-#     @assert size(X, 1) == size(A, 1)
-
-#     iA = pinv(A)
-#     return tr(X' * iA * X)
-# end
 
 
 """
@@ -312,7 +312,7 @@ Maximum likelihood estimation of Hurst exponent and volatility using fractional 
 - The input `X` can be either a vector, e.g. a sample trajectory of a fGn process, or a matrix of i.i.d. observations obtained from the fGn process by concatenating short vectors. 
 """
 function fGn_MLE_estim(X::AbstractVecOrMat{T}; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
-    # @assert 0. < ε < 1.
+    @assert 0. < ε < 1.
     func = h -> -fGn_log_likelihood_H(X, h)
 
     opm = nothing
@@ -326,9 +326,8 @@ function fGn_MLE_estim(X::AbstractVecOrMat{T}; method::Symbol=:optim, ε::Real=1
         # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
         hurst = Optim.minimizer(opm)[1]
     elseif method == :table    
-        Hs = collect(ε:ε:1-ε)
-        L = [func(h) for h in Hs]
-        hurst = Hs[argmin(L)]
+        Hs = collect(ε:ε:1-ε)        
+        hurst = Hs[argmin([func(h) for h in Hs])]
     else
         throw("Unknown method: ", method)
     end
@@ -357,7 +356,7 @@ The full covariance matrix of `J`-scale transform and of time-lag `N` is a N*J-b
 function fBm_bspline_covmat(l::Int, sclrng::AbstractArray{Int}, v::Int, H::Real, mode::Symbol)
     J = length(sclrng)
     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
-    Σs = [[C1rho(d/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng] .* A for d = 0:l]
+    Σs = [Cmat_bspline(H, v, d, sclrng, mode) .* A for d = 0:l]
 
     Σ = zeros(((l+1)*J, (l+1)*J))
     for r = 0:l
@@ -403,25 +402,29 @@ B-Spline wavelet-MLE estimator.
 """
 function fBm_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractArray{Int}, v::Int; method::Symbol=:optim, ε::Real=1e-2, mode::Symbol=:center) where {T<:Real}
     @assert size(X,1) % length(sclrng) == 0
-
     # number of wavelet coefficient vectors concatenated into one column of X
     L = size(X,1) ÷ length(sclrng)  # integer division: \div
     # N = ndims(X)>1 ? size(X,2) : 1
+    
+    func = x -> -fBm_bspline_log_likelihood_H(X, sclrng, v, x, mode)
 
-    func = x -> -fBm_bspline_log_likelihood_H(X, sclrng, v, x[1], mode)
+    opm = nothing
+    hurst = nothing
 
-    # # Gradient based
-    # # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
-    # optimizer = Optim.BFGS()
-    # opm = Optim.optimize(func, [ε], [1-ε], [0.5], Optim.Fminbox(optimizer))
-
-    # Non-gradient based
-    optimizer = Optim.Brent()
-    # optimizer = Optim.GoldenSection()
-    opm = Optim.optimize(func, ε, 1-ε, optimizer)
-
-    hurst = Optim.minimizer(opm)[1]
-
+    if method == :optim
+        # Gradient-free constrained optimization
+        opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+        # # Gradient-based optimization
+        # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+        # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+        hurst = Optim.minimizer(opm)[1]
+    elseif method == :table    
+        Hs = collect(ε:ε:1-ε)        
+        hurst = Hs[argmin([func(h) for h in Hs])]
+    else
+        throw("Unknown method: ", method)
+    end
+    
     Σ = fBm_bspline_covmat(L-1, sclrng, v, hurst, mode)
     σ = sqrt(xiAx(Σ, X) / length(X))
 

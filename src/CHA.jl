@@ -446,11 +446,9 @@ end
 Evaluate the Fourier transform of a centered B-Spline wavelet.
 """
 function _bspline_ft(ω::Real, v::Int)
-#     @assert v>0  # check vanishing moment
-
+    #     @assert v>0  # check vanishing moment
     # # Version 1: non centered ψ. This works with convolution mode `:left`` and produces artefacts of radiancy straight lines.
     # return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(sqrt(2π)*1im*ω))^(v)  # non-centered bspline: supported on [0, v]
-
     # Version 2: centered ψ. This works with convolution mode `:center` which is non-causal add produces artefacts of radial circles.
     return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(sqrt(2π)*1im*ω) * exp(-1im*ω/2))^(v)  # centered bspline: supported on [-v/2, v/2]
 end
@@ -542,9 +540,9 @@ Evaluate for B-Spline DCWT the matrix `C1_ρ()`
 - parallelization
 """
 function Cmat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractArray{Int}, mode::Symbol)
-    all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
-    C = ## TODO
-    [C1rho(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
+    # all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
+    return gamma(2H+1) * sin(π*H) * [Gfunc_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
+    # return [C1rho(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
 end
 
 """
