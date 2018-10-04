@@ -15,8 +15,8 @@ import SpecialFunctions: gamma, lgamma
 import DSP: conv, fft, ifft
 
 import Wavelets
-import Wavelets.WT.daubechies
-import Wavelets.Util.mirror
+# import Wavelets.WT.daubechies
+# import Wavelets.Util.mirror
 
 import DataFrames
 import GLM
@@ -31,6 +31,9 @@ import LinearAlgebra: norm, pinv
 
 import IterativeSolvers
 import IterativeSolvers: lsqr
+
+import RCall
+import PyCall
 
 # import Calculus
 

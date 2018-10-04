@@ -578,8 +578,8 @@ struct WaveletSampler<:DiscreteTimeSampler{FractionalIntegrated, DiscreteTimeReg
         v = psflag ? s : d  # fractional exponent for H+1/2 or H-1/2
 
         # original qmf filters
-        lo_ori = daubechies(2*r)
-        hi_ori = reverse(mirror(lo_ori))
+        lo_ori = Wavelets.WT.daubechies(2*r)
+        hi_ori = qmf(lo_ori)  # or: hi_ori = reverse(mirror(lo_ori))
 
         # modified qmf filters
         lo_mod = copy(lo_ori)

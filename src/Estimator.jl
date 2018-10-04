@@ -341,6 +341,45 @@ end
 
 ##### Wavelet-MLE #####
 
+
+function fBm_wavelet_log_likelihood_H(X::AbstractVecOrMat{T}, H::Real) where {T<:Real}
+    @assert 0 < H < 1
+    Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(H, 1.), size(X,1))))
+    return log_likelihood_H(Σ, X)
+end
+
+
+"""
+Doc.
+"""
+function fBm_wavelet_MLE_estim(X::AbstractVecOrMat{T}; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
+    @assert 0. < ε < 1.
+    func = h -> -fBm_wavelet_log_likelihood_H(X, h)
+
+    opm = nothing
+    hurst = nothing
+
+    if method == :optim
+        # Gradient-free constrained optimization
+        opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+        # # Gradient-based optimization
+        # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+        # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+        hurst = Optim.minimizer(opm)[1]
+    elseif method == :table    
+        Hs = collect(ε:ε:1-ε)        
+        hurst = Hs[argmin([func(h) for h in Hs])]
+    else
+        throw("Unknown method: ", method)
+    end
+    
+    Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(hurst, 1.), size(X,1))))
+    σ = sqrt(xiAx(Σ, X) / length(X))
+
+    return (hurst, σ), opm
+end
+
+
 """
 Compute the covariance matrix of B-Spline DCWT coefficients of a pure fBm.
 

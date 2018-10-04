@@ -11,18 +11,27 @@
 # - Vaidyanathan: 1
 
 """
-Construct the matrix of a convolution kernel h.
+Construct the matrix representation of the full convolution between a kernel `h` and a vector of length `N`.
 """
-function convolution_matrix(h::Vector{T}, N::Int) where T
+function convolution_matrix(h::AbstractVector{T}, N::Int) where {T<:Number}
     @assert N>0
     M = length(h)
+
     K = zeros(T, (M+N-1, M+N-1))
-    for r=1:M
-        for d=1:M+N-r
-            K[d+r-1,d] = h[r]
-        end
+    hz = vcat(h[end:-1:1], zeros(T, N-1)) # zero padding of the kernel
+    # K = hcat([circshift(hz,n) for n=0:M+N-2]...)
+    for n=0:M+N-2
+        K[:,n+1] = circshift(hz,n)
     end
-    return K[:,1:N]
+    return K[M:end,:]'
+    
+    # Another more efficient implementation
+    # for r=1:M
+    #     for d=1:M+N-r
+    #         K[d+r-1,d] = h[r]
+    #     end
+    # end
+    # return K[:,1:N]    
 end
 
 
@@ -39,12 +48,8 @@ The implementation follows the reference 2, but with a modified initialization.
 - https://en.wikipedia.org/wiki/Cascade_algorithm
 - http://cnx.org/content/m10486/latest/
 """
-function wavefunc(lo::Vector{Float64}, hi::Vector{Float64}=Float64[]; level::Int=10, nflag::Bool=true)
-    if isempty(hi)
-        hi = (lo .* (-1).^(1:length(lo)))[end:-1:1]
-    else
-        length(lo)==length(hi) || error("Invalid high-pass filter.")
-    end
+function wavefunc(lo::AbstractVector{T}, hi::AbstractVector{T}; level::Int=10, nflag::Bool=true) where {T<:Real}
+    @assert length(lo)==length(hi)
 
     # Initialization of the cascade algorithm
     # Method 1: using constant 1, this gives the best results (criteria of orthogonality etc.)
@@ -101,15 +106,15 @@ end
 Compute the masks for convolution for a mode of truncation.
 
 For a input signal `x` and a kernel `h`, the full convolution x*h has length `length(x)+length(h)-1`. This function computes two masks:
-- `kmask`: corresponds to the left/center/right part in x*h having the length of `x`
-- `vmask`: corresponds to the valide coefficients (boundary free) in x*h
+- `kmask`: corresponding to the left/center/right part in x*h having the length of `x`
+- `vmask`: corresponding to the valid coefficients (boundary free) in x*h
 
 Note that `vmask` does not depend on `mode` and `vmask[kmask]` gives the mask of length of `x` corresponding to the valid coefficients in `kmask`.
 
 # Args
 - nx: length of input signal
 - nh: length of kernel
-- mode: {:left, :right, :center}
+- mode: `:left` (or `:causal`), `:right` (or `:anticausal`), `:center` (or `:valid`)
 
 # Returns
 - kmask, vmask
@@ -126,11 +131,11 @@ julia> y[vmask] # valide part, same as y[kmask][dmask]
 function convmask(nx::Int, nh::Int, mode::Symbol)
     kmask = zeros(Bool, nx+nh-1)
 
-    if mode == :left
+    if mode == :left || mode == :causal
         kmask[1:nx] .= true
-    elseif mode == :right
+    elseif mode == :right || mode == :anticausal
         kmask[nh:end] .= true  # or mask0[end-nx+1:end] = true
-    elseif mode == :center
+    elseif mode == :center || mode == :valid
         m = max(1, div(nh, 2))
         kmask[m:m+nx-1] .= true
     else
@@ -177,7 +182,7 @@ Compute filters of Wavelet Packet transform.
 # Returns
 - a matrix of size ?-by-2^n that each column is a filter.
 """
-function wpt_filter(lo::Vector{T}, hi::Vector{T}, n::Int) where T<:Number
+function wpt_filter(lo::Vector{T}, hi::Vector{T}, n::Int) where {T<:Number}
     F0::Vector{Vector{T}}=[[1]]
     for l=1:n+1
         F1::Vector{Vector{T}}=[]
@@ -201,7 +206,7 @@ where x_i ∈ {lo, hi}, i.e. either the low or the high filter.
 # Returns
 - a matrix of size ?-by-(level+1) that each column is a filter.
 """
-function biconv_filter(lo::Vector{T}, hi::Vector{T}, n::Int) where T<:Number
+function biconv_filter(lo::Vector{T}, hi::Vector{T}, n::Int) where {T<:Number}
     @assert n>=0
     F0::Vector{Vector{T}}=[]
     for l=0:n+1
@@ -213,6 +218,15 @@ end
 
 
 """
+Quadratic mirrored filter.
+
+# Notes
+- IMPORTANT: convention of qmf is (-1).^(0:length(h)-1) NOT (-1).^(1:length(h))
+"""
+qmf(h::AbstractVector{T}) where {T<:Number} = reverse(h .* (-1).^(0:length(h)-1))  # reverse(x) = x[end:-1:1]
+
+
+"""
 Dyadic scale stationary wavelet transform using à trous algorithm.
 
 # Returns
@@ -220,48 +234,124 @@ Dyadic scale stationary wavelet transform using à trous algorithm.
 - dc: matrix of detail coefficients
 - mc: mask for valide coefficients
 """
-function swt(x::Vector{Float64}, level::Int, lo::Vector{Float64}, hi::Vector{Float64}=Float64[];
-        mode::Symbol=:center)
+function swt(x::AbstractVector{T}, lo::AbstractVector{T}, hi::AbstractVector{T}, level::Int, mode::Symbol) where {T<:Real}
     @assert level > 0
+    @assert length(lo) == length(hi)
 
-    # if high pass filter is not given, use the qmf.
-    if isempty(hi)
-        hi = (lo .* (-1).^(1:length(lo)))[end:-1:1]
-    else
-        @assert length(lo) == length(hi)
-    end
+    # # if high pass filter is not given, use the qmf.
+    # if isempty(hi)
+    #     hi = (lo .* (-1).^(1:length(lo)))[end:-1:1]
+    # else
+    #     @assert length(lo) == length(hi)
+    # end
 
     nx = length(x)
-    fct = 1  # unlike in the à trous algorithm of `wavefunc`, here the scaling factor must be 1.
-    ac = zeros(Float64, (length(x), level))
-    dc = zeros(Float64, (length(x), level))
-    mc = zeros(Bool, (length(x), level))
-
-    # Finest level transform
-    nk = length(lo)
-    km, vm = convmask(nx, nk, mode)
-    xd = conv(hi, x) * fct
-    xa = conv(lo, x) * fct
-    ac[:,1], dc[:,1], mc[:,1] = xa[km], xd[km], vm[km]
+    # fct = sqrt(2)  # scaling factor
+    fct = 1
+    ac = zeros(T, (nx, level+1))  # approximation coefficients
+    ac[:,1] = x
+    dc = zeros(T, (nx, level))  # detail coefficients
+    mc = zeros(Bool, (nx, level))  # masks
 
     # Iteration of the cascade algorithm
-    for n = 2:level
+    for n = 1:level
         # up-sampling of qmf filters
-        s = 2^(n-1)
-        l = (length(lo)-1) * s + 1
-        lo_up = zeros(Float64, l)
-        lo_up[1:s:end] = lo
-        hi_up = zeros(Float64, l)
-        hi_up[1:s:end] = hi
-        nk += l-1  # actual kernel length
-
-        km, vm = convmask(nx, nk, mode)
-        xd = conv(hi_up, xa) * fct
-        xa = conv(lo_up, xa) * fct
-        ac[:,n], dc[:,n], mc[:,n] = xa[km], xd[km], vm[km]
+        lo_up = upsampling(lo, 2^(n-1), tight=true)
+        hi_up = upsampling(hi, 2^(n-1), tight=true)        
+        km, vm = convmask(nx, length(lo_up), mode)
+        
+        mc[:,n] = vm[km]
+        dc[:,n] = fct * conv(hi_up, ac[:,n])[km]
+        ac[:,n+1] = fct * conv(lo_up, ac[:,n])[km]
     end
+    
+    return  ac[:,2:end], dc, mc
+end
 
-    return ac, dc, mc
+
+"""
+Inverse stationary transform.
+"""
+function iswt(ac::AbstractVector{T}, dc::AbstractMatrix{T}, lo::AbstractVector{T}, hi::AbstractVector{T}, mode::Symbol) where {T<:Real}
+    @assert length(ac) == size(dc,1)
+
+    level = size(dc, 2)  # number of levels of transform
+    nx = length(ac)  # length of resynthesized signal
+    # fct = sqrt(2)  # scaling factor
+    fct = 1
+    mask = zeros(nx)  # mask emulating the up-sampling operator in the decimated transform
+
+    xr = ac  # initalization of resynthesized signal
+    # xr = zeros(T, (nx,level))  # reconstructed approximation coefficients at different levels
+
+    for n=level:-1:1
+        lo_up = upsampling(lo, 2^(n-1), tight=true)
+        hi_up = upsampling(hi, 2^(n-1), tight=true)
+        km, vm = convmask(nx, length(lo_up), mode)
+
+        fill!(mask, 0); mask[1:2^(n):end] = 1 
+        xr = fct * (conv(hi_up, mask .* view(dc,:,n)) + conv(lo_up, mask .* xr))[km]
+    end
+    return xr
+end
+
+
+@PyCall.pyimport pywt
+function swt(x0::AbstractVector{T}, wvl::String, level::Int, mode::Symbol) where {T<:Real}
+    # wavelet = pywt.Wavelet(wvlname)
+    # dec_lo, dec_hi, rec_lo, rec_hi = wavelet[:inverse_filter_bank]
+    
+    # zero padding
+    n0 = length(x0)
+    nx = 2^(ceil(Int, log2(n0)))
+    x = zeros(T, nx)
+    s::Int = if mode == :left
+            1
+        elseif mode == :center
+            max((nx-n0)÷2,1)
+        else
+            nx-n0+1
+        end
+    x[s:s+n0-1] = x0
+    
+    mask = zeros(Bool, nx); mask[s:s+n0-1] = true
+    # mask = ones(Bool, nx)
+
+    w0 = pywt.swt(x, wvl, level=min(nx, level))
+    
+    # ac = hcat([c[1][mask] for c in w0]...)
+    # dc = hcat([c[2][mask] for c in w0]...)
+    ac = hcat([c[1] for c in w0]...)
+    dc = hcat([c[2] for c in w0]...)
+    
+    return ac, dc, mask
+end
+
+
+"""
+Embedding.
+"""
+function emb(x::AbstractVector{T}, mask::Vector{Bool}) where {T<:Number}
+    idx = findall(mask)
+    @assert length(x) <= length(idx)
+    y = zeros(T, length(mask))
+    y[idx] = x
+    return y
+end
+
+
+@PyCall.pyimport pywt
+function iswt(ac::AbstractVector{T}, dc::AbstractMatrix{T}, wvl::String, mask::Vector{Bool}) where {T<:Real}
+    level = size(dc,2)
+    w = [(ac, dc[:,1])]
+    for n=2:level
+        push!(w, (fill(0, size(mask)), dc[:,n]))
+    end
+    # w = [(emb(ac, mask), emb(dc[:,1], mask))]
+    # for n=2:level
+    #     push!(w, (fill(0, size(mask)), emb(dc[:,n], mask)))
+    # end
+    return pywt.iswt(w, wvl)[findall(mask)]
 end
 
 

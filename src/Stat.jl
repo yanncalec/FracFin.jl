@@ -1,6 +1,56 @@
 ########## General statistics ##########
 
 """
+Auto-Correlation function by RCall.
+"""
+function acf(X::AbstractVector{T}, lagmax::Integer) where {T<:Real}
+    res = RCall.rcopy(RCall.rcall(:acf, X, lagmax, plot=false, na_action=:na_pass))
+    return res[:acf][1:end-1]
+end
+
+"""
+Partial Auto-Correlation function by RCall.
+"""
+function pacf(X::AbstractVector{T}, lagmax::Integer) where {T<:Real}
+    res = RCall.rcopy(RCall.rcall(:pacf, X, lagmax, plot=false, na_action=:na_pass))
+    return res[:acf][:]
+end
+
+
+"""
+Auto-Correlation function of increment process.
+"""
+function acf_incr(X::AbstractVector{T}, dlags::Union{Int, AbstractVector{Int}}, almax::Int; method::Symbol=:acf) where {T<:Real}
+    # for single value of dlag: convert to a list
+    if typeof(dlags) <: Integer
+        dlags = [dlags]
+    end
+    
+    A = if method==:acf
+        [acf((X[l+1:end]-X[1:end-l])[100:end-100], almax) for l in dlags]
+    elseif method==:pacf
+        [pacf((X[l+1:end]-X[1:end-l])[100:end-100], almax) for l in dlags]            
+    else
+        error("Invalid method: $(method)")
+    end
+
+    # A = []  # output of acf
+    # for l in dlags
+    #     dX = X[l+1:end]-X[1:end-l]
+    #     if method==:acf
+    #         push!(A, acf(dX, almax))
+    #         # push!(A, [cor(dX[t+1:end], dX[1:end-t]) for t in tidx])
+    #     elseif method==:pacf
+    #         push!(A, pacf(dX, almax))
+    #     else
+    #         error("Invalid method: $(method)")
+    #     end
+    # end
+    return hcat(A...)
+end
+
+
+"""
     cov(X::AbstractVecOrMat, Y::AbstractVecOrMat, w::StatsBase.AbstractWeights)
 
 Reweighted covariance between `X` and `Y`, where each row is an observation.
