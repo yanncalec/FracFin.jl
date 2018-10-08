@@ -296,8 +296,20 @@ function iswt(ac::AbstractVector{T}, dc::AbstractMatrix{T}, lo::AbstractVector{T
 end
 
 
-@PyCall.pyimport pywt
+"""
+Embedding.
+"""
+function emb(x::AbstractVector{T}, mask::Vector{Bool}) where {T<:Number}
+    idx = findall(mask)
+    @assert length(x) <= length(idx)
+    y = zeros(T, length(mask))
+    y[idx] = x
+    return y
+end
+
+
 function swt(x0::AbstractVector{T}, wvl::String, level::Int, mode::Symbol) where {T<:Real}
+    # @PyCall.pyimport pywt
     # wavelet = pywt.Wavelet(wvlname)
     # dec_lo, dec_hi, rec_lo, rec_hi = wavelet[:inverse_filter_bank]
     
@@ -311,13 +323,13 @@ function swt(x0::AbstractVector{T}, wvl::String, level::Int, mode::Symbol) where
             max((nx-n0)÷2,1)
         else
             nx-n0+1
-        end
-    x[s:s+n0-1] = x0
+        end    
+    x[s:s+n0-1] = x0    
     
-    mask = zeros(Bool, nx); mask[s:s+n0-1] = true
+    mask = zeros(Bool, nx); mask[s:s+n0-1] .= true
     # mask = ones(Bool, nx)
 
-    w0 = pywt.swt(x, wvl, level=min(nx, level))
+    w0 = pywt[:swt](x, wvl, level=min(nx, level))
     
     # ac = hcat([c[1][mask] for c in w0]...)
     # dc = hcat([c[2][mask] for c in w0]...)
@@ -325,33 +337,21 @@ function swt(x0::AbstractVector{T}, wvl::String, level::Int, mode::Symbol) where
     dc = hcat([c[2] for c in w0]...)
     
     return ac, dc, mask
-end
+end    
 
 
-"""
-Embedding.
-"""
-function emb(x::AbstractVector{T}, mask::Vector{Bool}) where {T<:Number}
-    idx = findall(mask)
-    @assert length(x) <= length(idx)
-    y = zeros(T, length(mask))
-    y[idx] = x
-    return y
-end
-
-
-@PyCall.pyimport pywt
-function iswt(ac::AbstractVector{T}, dc::AbstractMatrix{T}, wvl::String, mask::Vector{Bool}) where {T<:Real}
+function iswt(ac::AbstractVector{T}, dc::AbstractMatrix{T}, wvl::String, mask::AbstractVector{Bool}) where {T<:Real}
+    # @PyCall.pyimport pywt
     level = size(dc,2)
     w = [(ac, dc[:,1])]
     for n=2:level
-        push!(w, (fill(0, size(mask)), dc[:,n]))
+        push!(w, (fill(0, size(ac)), dc[:,n]))
     end
     # w = [(emb(ac, mask), emb(dc[:,1], mask))]
     # for n=2:level
-    #     push!(w, (fill(0, size(mask)), emb(dc[:,n], mask)))
+    #     push!(w, (fill(0, size(ac)), emb(dc[:,n], mask)))
     # end
-    return pywt.iswt(w, wvl)[findall(mask)]
+    return pywt[:iswt](w, wvl)[findall(mask)]
 end
 
 
@@ -362,7 +362,7 @@ Continuous wavelet transform based on quadrature.
 - x: input signal
 - wfunc: function for evaluation of wavelet at integer scales
 """
-function cwt_quad(x::Vector{Float64}, wfunc::Function, sclrng::AbstractArray{Int}, mode::Symbol=:center)
+function cwt_quad(x::Vector{Float64}, wfunc::Function, sclrng::AbstractVector{Int}, mode::Symbol=:center)
     Ns = length(sclrng)
     Nx = length(x)
 
@@ -489,7 +489,7 @@ end
 """
 Continous Haar transform.
 """
-function cwt_haar(x::Vector{Float64}, sclrng::AbstractArray{Int}, mode::Symbol=:center)
+function cwt_haar(x::Vector{Float64}, sclrng::AbstractVector{Int}, mode::Symbol=:center)
     all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
 
     return cwt_quad(x, _intscale_haar_filter, sclrng, mode)
@@ -497,7 +497,7 @@ end
 
 
 """
-    cwt_bspline(x::Vector{Float64}, sclrng::AbstractArray{Int}, v::Int, mode::Symbol=:center)
+    cwt_bspline(x::Vector{Float64}, sclrng::AbstractVector{Int}, v::Int, mode::Symbol=:center)
 
 Continous B-Spline transform at integer (even) scales.
 
@@ -509,7 +509,7 @@ Continous B-Spline transform at integer (even) scales.
 
 # TODO: parallelization
 """
-function cwt_bspline(x::Vector{Float64}, sclrng::AbstractArray{Int}, v::Int, mode::Symbol=:center)
+function cwt_bspline(x::Vector{Float64}, sclrng::AbstractVector{Int}, v::Int, mode::Symbol=:center)
     all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
 
     # bsfilter = k->normalize(_intscale_bspline_filter(k, v))
@@ -527,7 +527,7 @@ end
 """
 Continous Mexican hat transform
 """
-function cwt_mexhat(x::Vector{Float64}, sclrng::AbstractArray{Int}, mode::Symbol=:center)
+function cwt_mexhat(x::Vector{Float64}, sclrng::AbstractVector{Int}, mode::Symbol=:center)
     return cwt_quad(x, _intscale_mexhat_filter, sclrng, mode)
 end
 
@@ -629,7 +629,7 @@ Evaluate for B-Spline DCWT the matrix `C1_ρ()`
 # TODO
 - parallelization
 """
-function Cmat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractArray{Int}, mode::Symbol)
+function Cmat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractVector{Int}, mode::Symbol)
     # all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
     return gamma(2H+1) * sin(π*H) * [Gfunc_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
     # return [C1rho(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]

@@ -71,6 +71,7 @@ Self-similar process with stationary increments (SSSI).
 """
 abstract type SSSIProcess<:SelfSimilarProcess end
 
+abstract type IncrementSSSIProcess{T<:TimeStyle, P<:SSSIProcess}<:StationaryIncrementProcess{T, P} end
 
 """
 Process of increments of a SSSI process.
@@ -370,6 +371,39 @@ function autocov(X::FractionalGaussianNoise, l::DiscreteTime)
     twoh::Float64 = 2*X.parent_process.hurst
     return 0.5 * X.step^twoh * (abs(l+1)^twoh + abs(l-1)^twoh - 2*abs(l)^twoh)
 end
+
+
+# """
+# Fractional Wavelet noise.
+
+# fWn is the (discrete-time) process resulting from the filtering of a fBm by a wavelet.
+# """
+# struct FractionalWaveletNoise<:DiscreteTimeSSSIProcess{FractionalBrownianMotion}
+#     parent_process::FractionalBrownianMotion
+#     step::Float64
+
+#     function FractionalGaussianNoise(hurst::Float64, step::Float64=1.)
+#         step > 0 || error("Step must be > 0.")
+#         new(FractionalBrownianMotion(hurst), step)
+#     end
+# end
+
+# step(X::FractionalGaussianNoise) = X.step
+
+# ss_exponent(X::FractionalGaussianNoise) = X.parent_process.hurst
+
+
+# """
+#     autocov(X::FractionalGaussianNoise, l::DiscreteTime)
+
+# Return the autocovariance function of fGn:
+#     1/2 δ^{2H} (|i-j+1|^{2H} + |i-j-1|^2H - 2|i-j|^{2H})
+# where δ is the step of increment.
+# """
+# function autocov(X::FractionalGaussianNoise, l::DiscreteTime)
+#     twoh::Float64 = 2*X.parent_process.hurst
+#     return 0.5 * X.step^twoh * (abs(l+1)^twoh + abs(l-1)^twoh - 2*abs(l)^twoh)
+# end
 
 
 #### Fractional Integrated Process ####

@@ -1,4 +1,4 @@
-# __precompile__()
+__precompile__()
 
 module FracFin
 
@@ -32,8 +32,17 @@ import LinearAlgebra: norm, pinv
 import IterativeSolvers
 import IterativeSolvers: lsqr
 
-import RCall
+# import RCall
+
 import PyCall
+# @PyCall.pyimport pywt
+# @PyCall.pyimport pywt.swt as pywt_swt
+# @PyCall.pyimport pywt.iswt as pywt_iswt
+const pywt = PyCall.PyNULL()
+
+function __init__()
+    copy!(pywt, PyCall.pyimport("pywt"))
+end
 
 # import Calculus
 

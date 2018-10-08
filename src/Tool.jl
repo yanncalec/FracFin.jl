@@ -3,9 +3,9 @@
 ##### Algebra #####
 
 ifloor(x::Int, y::Int) = floor(Int, x/y) * y
+# ifloor(x::Int, y::Int) = x - (x%y)
 iceil(x::Int, y::Int) = ceil(Int, x/y) * y
 
-ifloor(x::Int, y::Int) = x - (x%y)
 
 # function make_rolling_data(X::AbstractVecOrMat{T}, w::Int) where {T<:Real}
 #     d::Int = ndims(X)>1 ? size(X,1) : 1
