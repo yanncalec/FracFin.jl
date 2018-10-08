@@ -26,7 +26,7 @@ As example, for `trans = x -> vec(x)` the data on a rolling window is put into a
 function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, p::Int, (w,d,n)::Tuple{Int,Int,Int}, trans::Function=(x->vec(x)); mode::Symbol=:causal) where {T<:Real}
     L = (n-1)*d + w  # size of rolling window
     res = []
-    X = reshape(X0, ndims(X0)>1 ? size(X0,1) : 1, :)  # vec to matrix, create a reference not a copy
+    X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
     
     if mode == :causal
         for t = size(X,2):-p:1
@@ -199,6 +199,7 @@ function MLE_prepare_data(X0::AbstractVecOrMat{T}, (wsize,dlen,nobs)::Tuple{Int,
     return view(X1, :, 1:N)  # down-sampling and truncation
 end
 
+
 """
 Safe evaluation of the inverse quadratic form
     trace(X' * inv(A) * X)
@@ -340,38 +341,6 @@ end
 function fBm_bspline_MLE_estim(X::AbstractMatrix{T}, sclrng::AbstractVector{Int}, v::Int; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
     F = [_intscale_bspline_filter(s, v)/sqrt(s) for s in sclrng]  # extra 1/sqrt(s) factor due to the implementation of DCWT
     return fWn_MLE_estim(X, F; method=method, ε=ε)
-end
-
-
-"""
-Data preparation for fBm B-Spline MLE.
-
-# Examples
-```julia
-
-```
-"""
-function fBm_bspline_MLE_prepare_data(X0::AbstractMatrix{T}, (w,d,n)::Tuple{Int,Int,Int}=(1,1,0)) where {T<:Real}
-    X0[:,]
-    @assert lag>=1
-
-    Nspl = 5
-    dlen = 2
-    tidx =  dlen*(1:Nspl)
-
-    wsize = 100
-    # sidx = 10:20
-    sidx = [20]
-
-    Nmax = FracFin.ifloor(length(Wt[:, sidx]), length(sidx)*wsize)
-
-    Xo = reshape((X0[:])[1:Nmax], length(sidx)*wsize, :)[:, tidx]
-
-
-    dX0 = (X0[lag+1:end]-X0[1:end-lag])[(offset+1):lag:end]  # finite difference
-    dX1 = reshape(dX0[1:(length(dX0)-length(dX0)%w)], w, :)  # put into a matrix form
-    N = (n==0) ? size(dX1,2) : min(n*d, size(dX1,2))
-    return view(dX1, :, 1:d:N)  # down-sampling and truncation
 end
 
 

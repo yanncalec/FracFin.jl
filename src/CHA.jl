@@ -223,7 +223,9 @@ Quadratic mirrored filter.
 # Notes
 - IMPORTANT: convention of qmf is (-1).^(0:length(h)-1) NOT (-1).^(1:length(h))
 """
-qmf(h::AbstractVector{T}) where {T<:Number} = reverse(h .* (-1).^(0:length(h)-1))  # reverse(x) = x[end:-1:1]
+function qmf(h::AbstractVector{T}) where {T<:Number} 
+    reverse(h .* (-1).^(0:length(h)-1))  # reverse(x) = x[end:-1:1]
+end
 
 
 """
