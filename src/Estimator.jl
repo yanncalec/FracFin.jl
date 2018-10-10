@@ -112,15 +112,15 @@ function fBm_bspline_scalogram_estim(S::AbstractVector{T}, sclrng::AbstractVecto
     coef = GLM.coef(ols)
 
     hurst = coef[2]-1/2
-    C1 = C1rho(0, 1, hurst, v, mode)
-    σ = exp((coef[1] - log(abs(C1)))/2)
+    Aρ = Aρ_bspline(0, 1, hurst, v, mode)
+    σ = exp((coef[1] - log(abs(Aρ)))/2)
     return (hurst, σ), ols
 
     # Ar = hcat(xr, ones(length(xr)))  # design matrix
     # H0, η = Ar \ yr  # estimation of H and β
     # hurst = H0-1/2
-    # C1 = C1rho(0, r, hurst, v, mode)
-    # σ = exp((η - log(abs(C1)))/2)
+    # A = Aρ_bspline(0, r, hurst, v, mode)
+    # σ = exp((η - log(abs(A)))/2)
     # return hurst, σ
 end
 
@@ -131,6 +131,7 @@ end
 function fBm_bspline_scalogram_estim(W::AbstractVector{T}, sclrng::AbstractVector{Int}, v::Int; mode::Symbol=:center) where {T<:AbstractVector{<:Real}}
     return fBm_bspline_scalogram_estim([var(w) for w in W], sclrng, v; mode=mode)
 end
+
 
 """
 Generalized B-Spline scalogram estimator for Hurst exponent and volatility.
@@ -162,26 +163,34 @@ function fBm_gen_bspline_scalogram_estim(Σ::AbstractMatrix{T}, sclrng::Abstract
     coef = GLM.coef(ols)
 
     hurst = coef[2]-1/2
-    # println(hurst)
-    C1 = C1rho(0, r, hurst, v, mode)
-    σ = exp((coef[1] - log(abs(C1)))/2)
+    Aρ = Aρ_bspline(0, r, hurst, v, mode)
+    σ = exp((coef[1] - log(abs(Aρ)))/2)
     return (hurst, σ), ols
 
     # Ar = hcat(xr, ones(length(xr)))  # design matrix
     # H0, η = Ar \ yr  # estimation of H and β
     # hurst = H0-1/2
-    # C1 = C1rho(0, r, hurst, v, mode)
-    # σ = ℯ^((η - log(abs(C1)))/2)
+    # Aρ = Aρ_bspline(0, r, hurst, v, mode)
+    # σ = ℯ^((η - log(abs(Aρ)))/2)
     # return hurst, σ
 end
 
 
-##### MLE #####
+###### MLE ######
 
 """
 Data preparation for MLE.
 
-# Example
+This function constructs i.i.d. samples from the observation of a (multivariate) process. 
+
+# Args
+- X0: either a vector or a matrix, e.g. a sample trajectory of a fGn process (scalar) or a fWn process (multivariate)
+- w,d,n: 
+
+# Notes
+- MLE method in general is computationally expensive high dimension data, due to the size of the covariance matrix. One can use this function is to break long observations into short ones by assuming they are i.i.d.
+
+# Examples
 ```julia
 
 julia> wsize, dlen, nobs = 100, 1, 0
@@ -190,12 +199,12 @@ julia> (hurst_estim, σ_estim0), obj = FracFin.fGn_MLE_estim(dX)
 julia> σ_estim = σ_estim0 / lag^hurst  # obtain true estimation of σ by rescaling
 ```
 """
-function MLE_prepare_data(X0::AbstractVecOrMat{T}, (wsize,dlen,nobs)::Tuple{Int,Int,Int}) where {T<:Real}
+function MLE_prepare_data(X0::AbstractVecOrMat{T}, (w,d,n)::Tuple{Int,Int,Int}) where {T<:Real}
     if ndims(X0)==1
         X0 = reshape(X0, 1, :)
     end
-    X1 = hcat([vec(X0[:,t:t+wsize-1]) for t=1:dlen:size(X0,2) if t+wsize-1<=size(X0,2)]...)  # put into a matrix form
-    N = (nobs==0) ? size(X1,2) : min(nobs, size(X1,2))
+    X1 = hcat([vec(X0[:,t:t+w-1]) for t=1:d:size(X0,2) if t+w-1<=size(X0,2)]...)  # put into a matrix form
+    N = (n==0) ? size(X1,2) : min(n, size(X1,2))
     return view(X1, :, 1:N)  # down-sampling and truncation
 end
 
@@ -233,11 +242,11 @@ The value of log-likelihood (up to some additif constant) is
 # Notes
 - This function is common to all MLEs with the covariance matrix of form σ²A(h), where {σ, h} are unknown parameters. This kind of MLE can be carried out in h uniquely and σ is obtained from h.
 """
-function log_likelihood_H(A::AbstractMatrix{T}, X::AbstractMatrix{T}, ε::Real=0) where {T<:Real}
+function log_likelihood_H(A::AbstractMatrix{T}, X::AbstractVecOrMat{T}, ε::Real=0) where {T<:Real}
     @assert issymmetric(A)
     @assert size(X, 1) == size(A, 1)
 
-    N = size(X,2)  # number of i.i.d. samples in data
+    N = ndims(X)>1 ? size(X,2) : 1  # number of i.i.d. samples in data
     # d = size(X,1)  # such that N*d == length(X)
 
     S, U = eigen(A)  # so that U * Diagonal(S) * inv(U) == A, in particular, U' == inv(U)
@@ -260,12 +269,18 @@ end
 # end
 
 
+#### fWn-MLE ####
+# A fWn is the filtration of a fBm time series by a bank of high pass filters, eg, multiscale wavelet filters.
+
 """
 Compute the covariance matrix of a fWn at some time lag.
 
-# Notes
+# Args
+- F: array of filters
+- l: time lag
+- H: Hurst exponent
 """
-function fWn_lag_covmat(F::AbstractVector{<:AbstractVector{T}}, l::Int, H::Real) where {T<:Real}
+function fWn_covmat_lag(F::AbstractVector{<:AbstractVector{T}}, l::Int, H::Real) where {T<:Real}
     L = maximum([length(f) for f in F])  # maximum length of filters
     M = [abs(l+(n-m))^(2H) for n=0:L-1, m=0:L-1]    
     Σ = -1/2 * [ψi' * view(M, 1:length(ψi), 1:length(ψj)) * ψj for ψi in F, ψj in F]
@@ -274,13 +289,11 @@ end
 
 """
 Compute the covariance matrix of a time-concatenated fWn.
-
-# Notes
 """
 function fWn_covmat(F::AbstractVector{<:AbstractVector{T}}, lmax::Int, H::Real) where {T<:Real}
     J = length(F)
     Σ = zeros(((lmax+1)*J, (lmax+1)*J))
-    Σs = [fWn_lag_covmat(F, d, H) for d = 0:lmax]
+    Σs = [fWn_covmat_lag(F, d, H) for d = 0:lmax]
 
     for r = 0:lmax
         for c = 0:lmax
@@ -293,10 +306,7 @@ end
 
 
 """
-H-dependent log-likelihood of fraction wavelet noise (fWn) with optimal volatility.
-
-# Notes
-A fWn is the filtration of a fBm time series by a high pass wavelet.
+H-dependent log-likelihood of fraction wavelet noise (fWn) with optimal σ.
 """
 function fWn_log_likelihood_H(X::AbstractMatrix{T}, F::AbstractVector{<:AbstractVector{T}}, H::Real) where {T<:Real}
     @assert 0 < H < 1
@@ -306,7 +316,23 @@ function fWn_log_likelihood_H(X::AbstractMatrix{T}, F::AbstractVector{<:Abstract
     return log_likelihood_H(Σ, X)
 end
 
+"""
+General fWn-MLE of Hurst exponent and volatility.
 
+# Args
+- X: transformed coefficients, each column is a vector of coefficient; or concatenation of vectors.
+- F: array of filters, each corresponding to a row in X
+- method: :optim for optimization based or :table for look-up table based solution.
+- ε: this defines the bounded constraint [ε, 1-ε], and for method==:table this is also the step of search for Hurst exponent.
+
+# Returns
+- (hurst, σ): estimation
+- L: log-likelihood of estimation
+- opm: object of optimizer, for method==:optim only
+
+# Notes
+- X can also be the concatenation of vectors at at consecutive instants.
+"""
 function fWn_MLE_estim(X::AbstractMatrix{T}, F::AbstractVector{<:AbstractVector{T}}; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
     @assert 0. < ε < 1.
     @assert size(X,1) % length(F) == 0
@@ -332,50 +358,28 @@ function fWn_MLE_estim(X::AbstractMatrix{T}, F::AbstractVector{<:AbstractVector{
     
     Σ = Matrix(Symmetric(fWn_covmat(F, size(X,1)÷length(F)-1, hurst)))
     σ = sqrt(xiAx(Σ, X) / length(X))
-
-    return (hurst, σ), opm
+    L = log_likelihood_H(Σ, X)
+    
+    return (hurst, σ), L, opm
 end
 
 
+"""
+fWn-MLE based on B-Spline wavelet transform.
+
+# Args
+- X: DCWT coefficients, each column corresponding to a vector of coefficients. See `cwt_bspline()`.
+- sclrng: integer scales of DCWT
+- v: vanishing moments of B-Spline wavelet
+"""
 function fBm_bspline_MLE_estim(X::AbstractMatrix{T}, sclrng::AbstractVector{Int}, v::Int; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
     F = [_intscale_bspline_filter(s, v)/sqrt(s) for s in sclrng]  # extra 1/sqrt(s) factor due to the implementation of DCWT
     return fWn_MLE_estim(X, F; method=method, ε=ε)
 end
 
 
-"""
-Data preparation for fBm B-Spline MLE.
-
-# Examples
-```julia
-
-```
-"""
-function fBm_bspline_MLE_prepare_data(X0::AbstractMatrix{T}, (w,d,n)::Tuple{Int,Int,Int}=(1,1,0)) where {T<:Real}
-    X0[:,]
-    @assert lag>=1
-
-    Nspl = 5
-    dlen = 2
-    tidx =  dlen*(1:Nspl)
-
-    wsize = 100
-    # sidx = 10:20
-    sidx = [20]
-
-    Nmax = FracFin.ifloor(length(Wt[:, sidx]), length(sidx)*wsize)
-
-    Xo = reshape((X0[:])[1:Nmax], length(sidx)*wsize, :)[:, tidx]
-
-
-    dX0 = (X0[lag+1:end]-X0[1:end-lag])[(offset+1):lag:end]  # finite difference
-    dX1 = reshape(dX0[1:(length(dX0)-length(dX0)%w)], w, :)  # put into a matrix form
-    N = (n==0) ? size(dX1,2) : min(n*d, size(dX1,2))
-    return view(dX1, :, 1:d:N)  # down-sampling and truncation
-end
-
-
-##### fGn-MLE #####
+#### fGn-MLE ####
+# A special case of fWn-MLE which deserves it own implementation.
 
 function fGn_log_likelihood_H(X::AbstractVecOrMat{T}, H::Real) where {T<:Real}
     @assert 0 < H < 1
@@ -390,12 +394,7 @@ Maximum likelihood estimation of Hurst exponent and volatility using fractional 
 
 # Args
 - X: observation vector or matrix of a fGn process. For matrix input each column is an i.i.d. observation.
-- method: :optim for optimization based or :table for look-up table based solution.
-- ε: this defines the bounded constraint [ε, 1-ε], and for method==:table this is also the step of search for Hurst exponent.
-
-# Notes
-- This method is computationally expensive for long observations (say, >= 500 points). 
-- The input `X` can be either a vector, e.g. a sample trajectory of a fGn process, or a matrix of i.i.d. observations obtained from the fGn process by concatenating short vectors. 
+- method, ε: see `fWn_MLE_estim()`
 """
 function fGn_MLE_estim(X::AbstractVecOrMat{T}; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
     @assert 0. < ε < 1.
@@ -420,70 +419,17 @@ function fGn_MLE_estim(X::AbstractVecOrMat{T}; method::Symbol=:optim, ε::Real=1
     
     Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(hurst, 1.), size(X,1))))
     σ = sqrt(xiAx(Σ, X) / length(X))
+    L = log_likelihood_H(Σ, X)
 
-    return (hurst, σ), opm
+    return (hurst, σ), L, opm
 end
 
 
-############################### 
+##### B-Spline DCWT MLE (Not maintained) #####
+# Implementation based on DCWT formulation, not working well in practice.
 
-# """
-# # Args
-# - lag: time-lag for finite difference
-# """
-# function fGn_MLE_estim(dX0::AbstractVector{T}, (w,d,n)::Tuple{Int,Int,Int}=(100,1,0); method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}   
-#     return fGn_MLE_estim(dX; method=:optim, ε=1e-2)
-# end
-
-
-##### Wavelet-MLE #####
-
-
-# function fBm_wavelet_log_likelihood_H(X::AbstractVecOrMat{T}, H::Real) where {T<:Real}
-#     @assert 0 < H < 1
-#     Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(H, 1.), size(X,1))))
-#     return log_likelihood_H(Σ, X)
-# end
-
-
-# """
-# Doc.
-# """
-# function fBm_wavelet_MLE_estim(X::AbstractVecOrMat{T}; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
-#     @assert 0. < ε < 1.
-#     func = h -> -fBm_wavelet_log_likelihood_H(X, h)
-
-#     opm = nothing
-#     hurst = nothing
-
-#     if method == :optim
-#         # Gradient-free constrained optimization
-#         opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
-#         # # Gradient-based optimization
-#         # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
-#         # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
-#         hurst = Optim.minimizer(opm)[1]
-#     elseif method == :table    
-#         Hs = collect(ε:ε:1-ε)        
-#         hurst = Hs[argmin([func(h) for h in Hs])]
-#     else
-#         throw("Unknown method: ", method)
-#     end
-    
-#     Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(hurst, 1.), size(X,1))))
-#     σ = sqrt(xiAx(Σ, X) / length(X))
-
-#     return (hurst, σ), opm
-# end
-
-
-function _bspline_covmat(H::Real, v::Int, l::Int, sclrng::AbstractVector{Int})
-    Ψ = [_intscale_bspline_filter(j,v) for j in sclrng]  # filters of different scales
-    N = length(Ψ[end]) # maximum length of filters
-    M = [abs(l+(n-m))^(2H) for n=0:N-1, m=0:N-1]
-    
-    # Σ = -1/2 * [ψi[end:-1:1]' * view(M, 1:length(ψi), 1:length(ψj)) * ψj[end:-1:1] for ψi in Ψ, ψj in Ψ]
-    Σ = -1/2 * [ψi' * view(M, 1:length(ψi), 1:length(ψj)) * ψj for ψi in Ψ, ψj in Ψ]
+function fBm_bspline_covmat_lag(H::Real, v::Int, l::Int, sclrng::AbstractVector{Int}, mode::Symbol)
+    return Amat_bspline(H, v, l, sclrng) .* [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
 end
 
 
@@ -502,7 +448,7 @@ The full covariance matrix of `J`-scale transform and of time-lag `N` is a N*J-b
 function fBm_bspline_covmat(l::Int, sclrng::AbstractVector{Int}, v::Int, H::Real, mode::Symbol)    
     J = length(sclrng)
     Σ = zeros(((l+1)*J, (l+1)*J))
-    Σs = [_bspline_covmat(H, v, d, sclrng) for d = 0:l]
+    Σs = [fBm_bspline_covmat_lag(H, v, d, sclrng, mode) for d = 0:l]
 
     for r = 0:l
         for c = 0:l
@@ -513,22 +459,6 @@ function fBm_bspline_covmat(l::Int, sclrng::AbstractVector{Int}, v::Int, H::Real
     return Matrix(Symmetric(Σ))  #  forcing symmetry
     # return [(c>=r) ? Σs[c-r+1] : Σs[r-c+1]' for r=0:N-1, c=0:N-1]
 end
-
-# function fBm_bspline_covmat(l::Int, sclrng::AbstractVector{Int}, v::Int, H::Real, mode::Symbol)
-#     J = length(sclrng)
-#     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
-#     Σs = [Cmat_bspline(H, v, d, sclrng, mode) .* A for d = 0:l]
-
-#     Σ = zeros(((l+1)*J, (l+1)*J))
-#     for r = 0:l
-#         for c = 0:l
-#             Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (c>=r) ? Σs[c-r+1] : transpose(Σs[r-c+1])
-#         end
-#     end
-
-#     return Matrix(Symmetric(Σ))  #  forcing symmetry
-#     # return [(c>=r) ? Σs[c-r+1] : Σs[r-c+1]' for r=0:N-1, c=0:N-1]
-# end
 
 
 """
@@ -553,15 +483,8 @@ end
 
 """
 B-Spline wavelet-MLE estimator.
-
-# Args
-- `X`: 
-# Returns
-
-# Notes
-- `X`
 """
-function fBm_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVector{Int}, v::Int; method::Symbol=:optim, ε::Real=1e-2, mode::Symbol=:center) where {T<:Real}
+function fBm_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVector{Int}, v::Int, mode::Symbol; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
     @assert size(X,1) % length(sclrng) == 0
     # number of wavelet coefficient vectors concatenated into one column of X
     L = size(X,1) ÷ length(sclrng)  # integer division: \div
@@ -588,221 +511,6 @@ function fBm_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVector{In
     
     Σ = fBm_bspline_covmat(L-1, sclrng, v, hurst, mode)
     σ = sqrt(xiAx(Σ, X) / length(X))
-
-    return (hurst, σ), opm
-end
-
-
-
-
-
-# function partial_bspline_covmat(sclrng::AbstractVector{Int}, v::Int, H::Real, mode::Symbol)
-#     return full_bspline_covmat(0, sclrng, v, H, mode)
-# end
-
-
-# function partial_bspline_log_likelihood_H(X::AbstractVecOrMat{T}, sclrng::AbstractVector{Int}, v::Int, H::Real; mode::Symbol=:center) where {T<:Real}
-#     # @assert size(X,1) == length(sclrng)
-#     Σ = partial_bspline_covmat(sclrng, v, H, mode)
-#     # println(size(Σ))
-#     # println(size(X))
-
-#     return log_likelihood_H(Σ, X)
-# end
-
-
-# """
-# B-Spline wavelet-MLE estimator with partial covariance matrix.
-# """
-# function partial_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVector{Int}, v::Int; init::Real=0.5, mode::Symbol=:center) where {T<:Real}
-#     @assert size(X,1) == length(sclrng)
-
-#     func = h -> -partial_bspline_log_likelihood_H(X, sclrng, v, h; mode=mode)
-
-#     ε = 1e-5
-#     # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
-#     # optimizer = Optim.BFGS()
-#     # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
-#     opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
-
-#     hurst = Optim.minimizer(opm)[1]
-
-#     Σ = partial_bspline_covmat(sclrng, v, hurst, mode)
-#     σ = sqrt(xiAx(Σ, X) / length(X))
-
-#     return (hurst, σ), opm
-# end
-
-
-
-
-
-
-function partial_wavelet_log_likelihood_H(X::Matrix{Float64}, sclrng::AbstractVector{Int}, v::Int, H::Real; mode::Symbol=:center)
-    N, J = size(X)  # length and dim of X
-
-    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
-    Σ = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng] .* A
-
-    iΣ = pinv(Σ)  # regularization by pseudo-inverse
-
-    return -1/2 * (J*N*log(sum(X' .* (iΣ * X'))) + N*logdet(Σ))
-end
-
-
-function partial_wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractVector{Int}, v::Int, H::Real, σ::Real; mode::Symbol=:center)
-    N, d = size(X)  # length and dim of X
-
-    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
-    C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
-
-    Σ = σ^2 * C1 .* A
-    # Σ += Matrix(1.0I, size(Σ)) * max(1e-10, mean(abs.(Σ))*1e-5)
-
-    # println("H=$(H), σ=$(σ), mean(Σ)=$(mean(abs.(Σ)))")
-    # println("logdet(Σ)=$(logdet(Σ))")
-
-    # method 1:
-    # iX = Σ \ X'
-
-    # method 2:
-    iΣ = pinv(Σ)  # regularization by pseudo-inverse
-    iX = iΣ * X'  # regularization by pseudo-inverse
-
-    # # method 3:
-    # iX = lsqr(Σ, X')
-
-    return -1/2 * (tr(X*iX) + N*logdet(Σ) + N*d*log(2π))
-end
-
-
-# function wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractVector{Int}, v::Int, H::Real, σ::Real; mode::Symbol=:center)
-#     N, d = size(X)  # length and dim of X
-
-#     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
-#     C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
-
-#     Σ = σ^2 * C1 .* A
-#     # Σ += Matrix(1.0I, size(Σ)) * max(1e-10, mean(abs.(Σ))*1e-5)
-
-#     # println("H=$(H), σ=$(σ), mean(Σ)=$(mean(abs.(Σ)))")
-#     # println("logdet(Σ)=$(logdet(Σ))")
-
-#     # method 1:
-#     # iX = Σ \ X'
-
-#     # method 2:
-#     iΣ = pinv(Σ)  # regularization by pseudo-inverse
-#     iX = iΣ * X'  # regularization by pseudo-inverse
-
-#     # # method 3:
-#     # iX = lsqr(Σ, X')
-
-#     return -1/2 * (tr(X*iX) + N*logdet(Σ) + N*d*log(2π))
-# end
-
-
-# older version:
-# function wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractVector{Int}, v::Int, α::Real, β::Real; cflag::Bool=false, mode::Symbol=:center)
-#     N, d = size(X)  # length and dim of X
-
-#     H = cflag ? sigmoid(α) : α
-#     σ = cflag ? exp(β) : β
-
-#     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
-#     C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
-
-#     Σ = σ^2 * C1 .* A
-#     # Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
-
-#     # println("H=$(H), σ=$(σ), α=$(α), β=$(β), mean(Σ)=$(mean(abs.(Σ)))")
-#     # println("logdet(Σ)=$(logdet(Σ))")
-
-#     # method 1:
-#     # iX = Σ \ X'
-
-#     # # method 2:
-#     # iΣ = pinv(Σ)  # regularization by pseudo-inverse
-#     # iX = iΣ * X'  # regularization by pseudo-inverse
-
-#     # method 3:
-#     iX = lsqr(Σ, X')
-
-#     return -1/2 * (tr(X*iX) + N*log(abs(det(Σ))) + N*d*log(2π))
-# end
-
-
-# function grad_wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractVector{Int}, v::Int, α::Real, β::Real; cflag::Bool=false, mode::Symbol=:center)
-#     N, d = size(X)  # length and dim of X
-
-#     H = cflag ? sigmoid(α) : α
-#     σ = cflag ? exp(β) : β
-
-#     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
-#     C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
-#     dAda = [log(i*j) for i in sclrng, j in sclrng] .* A
-#     dC1da = [diff_C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
-
-#     if cflag
-#         dAda *= diff_sigmoid(α)
-#         dC1da *= diff_sigmoid(α)
-#     end
-
-#     Σ = σ^2 * C1 .* A
-#     # Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
-#     dΣda = σ^2 * (dC1da .* A + C1 .* dAda)
-#     dΣdb = cflag ? 2*Σ : 2σ * C1 .* A
-
-#     # method 1:
-#     # iX = Σ \ X'
-#     # da = N * tr(Σ \ dΣda) - tr(iX' * dΣda * iX)
-#     # db = N * tr(Σ \ dΣdb) - tr(iX' * dΣdb * iX)
-
-#     # method 2:
-#     iΣ = pinv(Σ)  # regularization by pseudo-inverse
-#     iX = iΣ * X'
-#     da = N * tr(iΣ * dΣda) - tr(iX' * dΣda * iX)
-#     db = N * tr(iΣ * dΣdb) - tr(iX' * dΣdb * iX)
-
-#     # method 3:
-#     # iX = lsqr(Σ, X')
-#     # da = N * tr(lsqr(Σ, dΣda)) - tr(iX' * dΣda * iX)
-#     # db = N * tr(lsqr(Σ, dΣdb)) - tr(iX' * dΣdb * iX)
-
-#     return  -1/2 * [da, db]
-# end
-
-
-function wavelet_MLE_estim(X::Matrix{Float64}, sclrng::AbstractVector{Int}, v::Int; vars::Symbol=:all, init::Vector{Float64}=[0.5,1.], mode::Symbol=:center)
-    @assert size(X,2) == length(sclrng)
-    @assert length(init) == 2
-
-    func = x -> ()
-    hurst, σ = init
-    # println(init)
-
-    if vars == :all
-        func = x -> -wavelet_MLE_obj(X, sclrng, v, x[1], x[2]; mode=mode)
-    elseif vars == :hurst
-        func = x -> -wavelet_MLE_obj(X, sclrng, v, x[1], σ; mode=mode)
-    else
-        func = x -> -wavelet_MLE_obj(X, sclrng, v, hurst, x[2]; mode=mode)
-    end
-
-    ε = 1e-8
-    # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
-    optimizer = Optim.BFGS()
-    opm = Optim.optimize(func, [ε, ε], [1-ε, 1/ε], init, Optim.Fminbox(optimizer))
-    # opm = Optim.optimize(func, [ε, ε], [1-ε, 1/ε], init, Optim.Fminbox(optimizer); autodiff=:forward)
-    res = Optim.minimizer(opm)
-
-    if vars == :all
-        hurst, σ = res[1], res[2]
-    elseif vars == :hurst
-        hurst = res[1]
-    else
-        σ = res[2]
-    end
 
     return (hurst, σ), opm
 end

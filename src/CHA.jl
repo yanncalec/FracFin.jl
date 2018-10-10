@@ -223,7 +223,9 @@ Quadratic mirrored filter.
 # Notes
 - IMPORTANT: convention of qmf is (-1).^(0:length(h)-1) NOT (-1).^(1:length(h))
 """
-qmf(h::AbstractVector{T}) where {T<:Number} = reverse(h .* (-1).^(0:length(h)-1))  # reverse(x) = x[end:-1:1]
+function qmf(h::AbstractVector{T}) where {T<:Number} 
+    reverse(h .* (-1).^(0:length(h)-1))  # reverse(x) = x[end:-1:1]
+end
 
 
 """
@@ -232,7 +234,10 @@ Dyadic scale stationary wavelet transform using à trous algorithm.
 # Returns
 - ac: matrix of approximation coefficients with increasing scale index in column direction
 - dc: matrix of detail coefficients
-- mc: mask for valide coefficients
+- mc: mask for valid coefficients
+
+# Notes
+Current implementation is buggy: reconstruction by `iswt` can be very wrong.
 """
 function swt(x::AbstractVector{T}, lo::AbstractVector{T}, hi::AbstractVector{T}, level::Int, mode::Symbol) where {T<:Real}
     @assert level > 0
@@ -308,6 +313,24 @@ function emb(x::AbstractVector{T}, mask::Vector{Bool}) where {T<:Number}
 end
 
 
+"""
+Dyadic scale stationary wavelet transform using python library `pywt`.
+
+# Args
+- x0: input signal
+- wvl: name of wavelet, see `pywt.swt` documentation
+- level: levels of decomposition
+- mode: mode of zero-padding
+
+# Returns
+- ac: matrix of approximation coefficients with increasing scale index in column direction
+- dc: matrix of detail coefficients
+- mask: mask of zero-padding
+
+# Notes
+- Original signal is zero-padded since `pywt.swt` requires signals of length 2^N
+- The mode of convolution used by `pywt.swt` is not clear.
+"""
 function swt(x0::AbstractVector{T}, wvl::String, level::Int, mode::Symbol) where {T<:Real}
     # @PyCall.pyimport pywt
     # wavelet = pywt.Wavelet(wvlname)
@@ -340,6 +363,14 @@ function swt(x0::AbstractVector{T}, wvl::String, level::Int, mode::Symbol) where
 end    
 
 
+"""
+Inverse stationary wavelet transform using python library `pywt`.
+
+# Args
+- ac, dc: see outputs of `swt`
+- wvl: name of wavelet, see `pywt.swt` documentation
+- mask: mask of zero-padding
+"""
 function iswt(ac::AbstractVector{T}, dc::AbstractMatrix{T}, wvl::String, mask::AbstractVector{Bool}) where {T<:Real}
     # @PyCall.pyimport pywt
     level = size(dc,2)
@@ -361,8 +392,15 @@ Continuous wavelet transform based on quadrature.
 # Args
 - x: input signal
 - wfunc: function for evaluation of wavelet at integer scales
+- sclrng: range of integer scales
+- mode: mode of convolution {:left, :center, :right} or {:causal, :valid, :anticausal}
+
+# Notes
+- This function implements the discretized cwt (DCWT), defined as
+    w[m,k] = 1/\sqrt{k} \sum_n X[n]\psi(\frac{m-n}{k})
+for the transform at integer scale k and position m.
 """
-function cwt_quad(x::Vector{Float64}, wfunc::Function, sclrng::AbstractVector{Int}, mode::Symbol=:center)
+function cwt_quad(x::Vector{Float64}, wfunc::Function, sclrng::AbstractVector{Int}, mode::Symbol)
     Ns = length(sclrng)
     Nx = length(x)
 
@@ -388,7 +426,7 @@ Evaluate the wavelet function at integer scales by looking-up table.
 - k: scale
 - ψ: values of compact wavelet function on a grid
 - Sψ: support of ψ
-- v: desired number of vanishing moments of ψ
+- v: desired number of vanishing moments of ψ, if >0 apply orthogonal projection.
 
 # Returns
 - f: the vector (ψ(n/k))_n such that n/k lies in Sψ.
@@ -489,7 +527,7 @@ end
 """
 Continous Haar transform.
 """
-function cwt_haar(x::Vector{Float64}, sclrng::AbstractVector{Int}, mode::Symbol=:center)
+function cwt_haar(x::Vector{Float64}, sclrng::AbstractVector{Int}, mode::Symbol)
     all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
 
     return cwt_quad(x, _intscale_haar_filter, sclrng, mode)
@@ -497,7 +535,7 @@ end
 
 
 """
-    cwt_bspline(x::Vector{Float64}, sclrng::AbstractVector{Int}, v::Int, mode::Symbol=:center)
+    cwt_bspline(x::Vector{Float64}, sclrng::AbstractVector{Int}, v::Int, mode::Symbol)
 
 Continous B-Spline transform at integer (even) scales.
 
@@ -509,7 +547,7 @@ Continous B-Spline transform at integer (even) scales.
 
 # TODO: parallelization
 """
-function cwt_bspline(x::Vector{Float64}, sclrng::AbstractVector{Int}, v::Int, mode::Symbol=:center)
+function cwt_bspline(x::Vector{Float64}, sclrng::AbstractVector{Int}, v::Int, mode::Symbol)
     all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
 
     # bsfilter = k->normalize(_intscale_bspline_filter(k, v))
@@ -534,6 +572,12 @@ end
 
 """
 Evaluate the Fourier transform of a centered B-Spline wavelet.
+
+# Notes
+- Convention of Fourier transform: 
+    \hat{f}(ω) = 1/√2π ∫f(t)e^{iωt} dt
+- Convention of Fourier transform: 
+    f(t) = 1/√2π ∫\hat{f}(ω)e^{-iωt} dω
 """
 function _bspline_ft(ω::Real, v::Int)
     #     @assert v>0  # check vanishing moment
@@ -553,26 +597,28 @@ Maximum scale of B-Spline wavelet transform of `v` vanishing moments for a signa
 """
 maxscale_bspline(N::Int, v::Int) = floor(Int, (N+1)/v/2)
 
+
 """
-The integrand function of G^ψ_ρ(τ, H) with a centered B-spline wavelet.
+The integrand function of C^ψ_ρ(τ, H) with a centered B-spline wavelet.
 """
-function Gfunc_bspline_integrand_center(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
+function Cψρ_bspline_integrand_center(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
     @assert v > H+1/2  # otherwise may raise `DomainError with 0.0`
-    return 1/16^v * 1/2π * (ω^2)^(v-(H+1/2)) * (sinc(ω*√ρ/4π)*sinc(ω/√ρ/4π))^(2v) * cos(ω*τ)
+    return 1/(16^v * 2π) * (ω^2)^(v-(H+1/2)) * (sinc(ω*√ρ/4π)*sinc(ω/√ρ/4π))^(2v) * cos(ω*τ)
 end
 
+
 """
-Evaluate the integrand function of G^ψ_ρ(τ, H)
+Evaluate the integrand function of C^ψ_ρ(τ, H)
 
 # Args
-- τ, ω, ρ, H: see definition of G^ψ_ρ(τ, H).
+- τ, ω, ρ, H: see definition of C^ψ_ρ(τ, H).
 - v: vanishing moments of the Bspline wavelet ψ, e.g. v=1 for Haar wavelet.
 
 # Note
-- We use the fact that G^ψ_ρ(τ, H) is a real function to simplify the implementation.
+- We use the fact that C^ψ_ρ(τ, H) is a real function to simplify the implementation.
 - In Julia the sinc function is defined as `sinc(x)=sin(πx)/(πx)`.
 """
-function Gfunc_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int, mode::Symbol)
+function Cψρ_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int, mode::Symbol)
     # @assert ρ>0 && 1>H>0 && v>0
 
     # The integrand is, by definition
@@ -581,80 +627,71 @@ function Gfunc_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int, 
     #    exp(-1im*ω*v*(√ρ-1/√ρ)/2), if the convolution mode is :left, i.e. causal
     # or exp(+1im*ω*v*(√ρ-1/√ρ)/2), if the convolution mode is :right, i.e. anti-causal
     # However, such implementation is numerically unstable due to singularities. We rewrite the function in an equivalent form using the sinc function which is numerically stable.
-    if mode == :center
-        return Gfunc_bspline_integrand_center(τ, ω, ρ, H, v)
-    elseif mode == :left
-        return Gfunc_bspline_integrand_center(τ+v*(√ρ-1/√ρ)/2, ω, ρ, H, v)
-    elseif mode == :right
-        return Gfunc_bspline_integrand_center(τ-v*(√ρ-1/√ρ)/2, ω, ρ, H, v)
+    if mode == :center || mode == :valid
+        return Cψρ_bspline_integrand_center(τ, ω, ρ, H, v)
+    elseif mode == :left || mode == :causal
+        return Cψρ_bspline_integrand_center(τ+v*(√ρ-1/√ρ)/2, ω, ρ, H, v)
+    elseif mode == :right || mode == :anticausal
+        return Cψρ_bspline_integrand_center(τ-v*(√ρ-1/√ρ)/2, ω, ρ, H, v)
     else
         throw(UndefRefError("Unknown mode: $(mode)"))
     end
 end
 
-"""
-Evaluate the function G^ψ_ρ(τ,H) by numerical integration.
-"""
-function Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
-    f = ω -> Gfunc_bspline_integrand(τ, ω, ρ, H, v, mode)
-    # println("τ=$τ, ρ=$ρ, H=$H, v=$v") #
 
+"""
+Evaluate the function C^ψ_ρ(τ,H) by numerical integration.
+"""
+function Cψρ_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
+    f = ω -> Cψρ_bspline_integrand(τ, ω, ρ, H, v, mode)
+    # println("τ=$τ, ρ=$ρ, H=$H, v=$v") #
     res = QuadGK.quadgk(f, rng...)[1]
     # res = 1e-4 * sum(f.(rng[1]:1e-4:rng[2]))
 
     return res
 end
 
+
 """
 Derivative w.r.t. H
 """
-function diff_Gfunc_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
-    f = ω -> ((ω==0) ? 0 : (-log(ω^2) * Gfunc_bspline_integrand(τ, ω, ρ, H, v, mode)))
-    res = QuadGK.quadgk(f, rng...)[1]
-    # res = try
-    #     # QuadGK.quadgk(f, -100, 100, order=10)[1]
-    #     QuadGK.quadgk(f, rng...)[1]
-    # catch
-    #     1e-3 * sum(f.(rng[1]:1e-3:rng[2]))
-    # end
-    return res
+function diff_Cψρ_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
+    f = ω -> ((ω==0) ? 0 : (-log(ω^2) * Cψρ_bspline_integrand(τ, ω, ρ, H, v, mode)))
+    return QuadGK.quadgk(f, rng...)[1]
 end
 
 """
-Evaluate for B-Spline DCWT the matrix `C1_ρ()`
+Evaluate the matrix of `A_ρ(H, τ)` for varing ρ with the B-Spline wavelet.
 
 # Notes
 - The true scale is two times the scale index due to the special implementation of B-Spline wavelet, see also `_intscale_bspline_filter()`.
-
-# TODO
-- parallelization
+- Consider parallelization.
 """
-function Cmat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractVector{Int}, mode::Symbol)
+function Amat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractVector{Int}, mode::Symbol)
     # all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
-    return gamma(2H+1) * sin(π*H) * [Gfunc_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
-    # return [C1rho(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
+    return gamma(2H+1) * sin(π*H) * [Cψρ_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
 end
 
 """
-Function C^1_ρ(τ, H)
+Evaluate A_ρ(τ, H)
 
 # Args
 - τ, ρ, H: see definition
 - v: vanishing moments of the wavelet ψ
 - mode: {:left, :center, :right} for causal, centered, anti-causal ψ
 """
-C1rho(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol) = gamma(2H+1) * sin(π*H) * Gfunc_bspline(τ, ρ, H, v, mode)
+Aρ_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol) = gamma(2H+1) * sin(π*H) * Cψρ_bspline(τ, ρ, H, v, mode)
 
 diff_gamma = x -> ForwardDiff.derivative(gamma, x)
 
 """
 Derivative w.r.t. H
 """
-function diff_C1rho(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol)
-    d1 = 2 * diff_gamma(2H+1) * sin(π*H) * Gfunc_bspline(τ, ρ, H, v, mode)
-    d2 = gamma(2H+1) * cos(π*H) * π * Gfunc_bspline(τ, ρ, H, v, mode)
-    # d3 = gamma(2H+1) * sin(π*H) * ForwardDiff.derivative(H->Gfunc_bspline(τ, ρ, H, v, mode), H)
-    d3 = gamma(2H+1) * sin(π*H) * diff_Gfunc_bspline(τ, ρ, H, v, mode)
+function diff_Aρ_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol)
+    d1 = 2 * diff_gamma(2H+1) * sin(π*H) * Cψρ_bspline(τ, ρ, H, v, mode)
+    d2 = gamma(2H+1) * cos(π*H) * π * Cψρ_bspline(τ, ρ, H, v, mode)
+    # d3 = gamma(2H+1) * sin(π*H) * ForwardDiff.derivative(H->Cψρ_bspline(τ, ρ, H, v, mode), H)
+    d3 = gamma(2H+1) * sin(π*H) * diff_Cψρ_bspline(τ, ρ, H, v, mode)
     return d1 + d2 + d3
 end
 

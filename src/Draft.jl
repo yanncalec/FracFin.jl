@@ -1,6 +1,38 @@
 ########## Collection of obseleted codes ##########
 
 
+
+# function rolling_estim(func::Function, X::AbstractMatrix{T}, widx::AbstractArray{Int}, p::Int) where {T<:Real}
+#     # wsize = w[end]-w[1]+1
+#     # @assert wsize <= size(X,2)
+#     return [func(X[:,n+widx]) for n=1:p:size(X,2) if n+widx[end]<size(X,2)]
+#     # res = []
+#     # for n=1:p:size(X,2)
+#     #     idx = n+w
+#     #     idx = idx[idx.<=size(X,2)]
+#     #     push!(res, func(view(X, :,n+w)))
+#     # end
+# end
+
+
+# function rolling_estim(fun::Function, X::AbstractVector{T}, wsize::Int, p::Int=1) where T
+#     offset = wsize-1
+#     res = [fun(view(X, (n*p):(n*p+wsize-1))) for n=1:p:N]
+#     end
+
+#     # y = fun(view(X, idx:idx+offset))  # test return type of fun
+#     res = Vector{typeof(y)}(undef, div(length(data)-offset, p))
+#     @inbounds for n=1:p:N
+#         push!(res, fun(view(X, (idx*p):(idx*p+offset))))
+#         end
+#     @inbounds for n in eachindex(res)
+#         res[n] = fun(hcat(X[idx*p:idx*p+offset]...))
+#     end
+
+#     return res
+# end
+
+
 # function scalogram_estim(Cxx::Matrix{Float64}, sclrng::AbstractArray{Int}, ρmax::Int=1)
 #     nr, nc = size(Cxx)
 #     @assert nr == nc == length(sclrng)
@@ -292,3 +324,218 @@ function wavelet_MLE_estim(X::Matrix{Float64}, sclrng::AbstractArray{Int}, v::In
 
     return (hurst_estim, σ_estim), opm
 end
+
+
+
+
+# function partial_bspline_covmat(sclrng::AbstractVector{Int}, v::Int, H::Real, mode::Symbol)
+#     return full_bspline_covmat(0, sclrng, v, H, mode)
+# end
+
+
+# function partial_bspline_log_likelihood_H(X::AbstractVecOrMat{T}, sclrng::AbstractVector{Int}, v::Int, H::Real; mode::Symbol=:center) where {T<:Real}
+#     # @assert size(X,1) == length(sclrng)
+#     Σ = partial_bspline_covmat(sclrng, v, H, mode)
+#     # println(size(Σ))
+#     # println(size(X))
+
+#     return log_likelihood_H(Σ, X)
+# end
+
+
+# """
+# B-Spline wavelet-MLE estimator with partial covariance matrix.
+# """
+# function partial_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVector{Int}, v::Int; init::Real=0.5, mode::Symbol=:center) where {T<:Real}
+#     @assert size(X,1) == length(sclrng)
+
+#     func = h -> -partial_bspline_log_likelihood_H(X, sclrng, v, h; mode=mode)
+
+#     ε = 1e-5
+#     # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+#     # optimizer = Optim.BFGS()
+#     # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+#     opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+
+#     hurst = Optim.minimizer(opm)[1]
+
+#     Σ = partial_bspline_covmat(sclrng, v, hurst, mode)
+#     σ = sqrt(xiAx(Σ, X) / length(X))
+
+#     return (hurst, σ), opm
+# end
+
+
+
+
+
+
+function partial_wavelet_log_likelihood_H(X::Matrix{Float64}, sclrng::AbstractVector{Int}, v::Int, H::Real; mode::Symbol=:center)
+    N, J = size(X)  # length and dim of X
+
+    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+    Σ = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng] .* A
+
+    iΣ = pinv(Σ)  # regularization by pseudo-inverse
+
+    return -1/2 * (J*N*log(sum(X' .* (iΣ * X'))) + N*logdet(Σ))
+end
+
+
+function partial_wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractVector{Int}, v::Int, H::Real, σ::Real; mode::Symbol=:center)
+    N, d = size(X)  # length and dim of X
+
+    A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+    C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
+
+    Σ = σ^2 * C1 .* A
+    # Σ += Matrix(1.0I, size(Σ)) * max(1e-10, mean(abs.(Σ))*1e-5)
+
+    # println("H=$(H), σ=$(σ), mean(Σ)=$(mean(abs.(Σ)))")
+    # println("logdet(Σ)=$(logdet(Σ))")
+
+    # method 1:
+    # iX = Σ \ X'
+
+    # method 2:
+    iΣ = pinv(Σ)  # regularization by pseudo-inverse
+    iX = iΣ * X'  # regularization by pseudo-inverse
+
+    # # method 3:
+    # iX = lsqr(Σ, X')
+
+    return -1/2 * (tr(X*iX) + N*logdet(Σ) + N*d*log(2π))
+end
+
+
+# function wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractVector{Int}, v::Int, H::Real, σ::Real; mode::Symbol=:center)
+#     N, d = size(X)  # length and dim of X
+
+#     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+#     C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
+
+#     Σ = σ^2 * C1 .* A
+#     # Σ += Matrix(1.0I, size(Σ)) * max(1e-10, mean(abs.(Σ))*1e-5)
+
+#     # println("H=$(H), σ=$(σ), mean(Σ)=$(mean(abs.(Σ)))")
+#     # println("logdet(Σ)=$(logdet(Σ))")
+
+#     # method 1:
+#     # iX = Σ \ X'
+
+#     # method 2:
+#     iΣ = pinv(Σ)  # regularization by pseudo-inverse
+#     iX = iΣ * X'  # regularization by pseudo-inverse
+
+#     # # method 3:
+#     # iX = lsqr(Σ, X')
+
+#     return -1/2 * (tr(X*iX) + N*logdet(Σ) + N*d*log(2π))
+# end
+
+
+# older version:
+# function wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractVector{Int}, v::Int, α::Real, β::Real; cflag::Bool=false, mode::Symbol=:center)
+#     N, d = size(X)  # length and dim of X
+
+#     H = cflag ? sigmoid(α) : α
+#     σ = cflag ? exp(β) : β
+
+#     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+#     C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
+
+#     Σ = σ^2 * C1 .* A
+#     # Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
+
+#     # println("H=$(H), σ=$(σ), α=$(α), β=$(β), mean(Σ)=$(mean(abs.(Σ)))")
+#     # println("logdet(Σ)=$(logdet(Σ))")
+
+#     # method 1:
+#     # iX = Σ \ X'
+
+#     # # method 2:
+#     # iΣ = pinv(Σ)  # regularization by pseudo-inverse
+#     # iX = iΣ * X'  # regularization by pseudo-inverse
+
+#     # method 3:
+#     iX = lsqr(Σ, X')
+
+#     return -1/2 * (tr(X*iX) + N*log(abs(det(Σ))) + N*d*log(2π))
+# end
+
+
+# function grad_wavelet_MLE_obj(X::Matrix{Float64}, sclrng::AbstractVector{Int}, v::Int, α::Real, β::Real; cflag::Bool=false, mode::Symbol=:center)
+#     N, d = size(X)  # length and dim of X
+
+#     H = cflag ? sigmoid(α) : α
+#     σ = cflag ? exp(β) : β
+
+#     A = [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+#     C1 = [C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
+#     dAda = [log(i*j) for i in sclrng, j in sclrng] .* A
+#     dC1da = [diff_C1rho(0, j/i, H, v, mode) for i in sclrng, j in sclrng]
+
+#     if cflag
+#         dAda *= diff_sigmoid(α)
+#         dC1da *= diff_sigmoid(α)
+#     end
+
+#     Σ = σ^2 * C1 .* A
+#     # Σ += Matrix(1.0I, size(Σ)) * max(1e-8, mean(abs.(Σ))*1e-5)
+#     dΣda = σ^2 * (dC1da .* A + C1 .* dAda)
+#     dΣdb = cflag ? 2*Σ : 2σ * C1 .* A
+
+#     # method 1:
+#     # iX = Σ \ X'
+#     # da = N * tr(Σ \ dΣda) - tr(iX' * dΣda * iX)
+#     # db = N * tr(Σ \ dΣdb) - tr(iX' * dΣdb * iX)
+
+#     # method 2:
+#     iΣ = pinv(Σ)  # regularization by pseudo-inverse
+#     iX = iΣ * X'
+#     da = N * tr(iΣ * dΣda) - tr(iX' * dΣda * iX)
+#     db = N * tr(iΣ * dΣdb) - tr(iX' * dΣdb * iX)
+
+#     # method 3:
+#     # iX = lsqr(Σ, X')
+#     # da = N * tr(lsqr(Σ, dΣda)) - tr(iX' * dΣda * iX)
+#     # db = N * tr(lsqr(Σ, dΣdb)) - tr(iX' * dΣdb * iX)
+
+#     return  -1/2 * [da, db]
+# end
+
+
+function wavelet_MLE_estim(X::Matrix{Float64}, sclrng::AbstractVector{Int}, v::Int; vars::Symbol=:all, init::Vector{Float64}=[0.5,1.], mode::Symbol=:center)
+    @assert size(X,2) == length(sclrng)
+    @assert length(init) == 2
+
+    func = x -> ()
+    hurst, σ = init
+    # println(init)
+
+    if vars == :all
+        func = x -> -wavelet_MLE_obj(X, sclrng, v, x[1], x[2]; mode=mode)
+    elseif vars == :hurst
+        func = x -> -wavelet_MLE_obj(X, sclrng, v, x[1], σ; mode=mode)
+    else
+        func = x -> -wavelet_MLE_obj(X, sclrng, v, hurst, x[2]; mode=mode)
+    end
+
+    ε = 1e-8
+    # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+    optimizer = Optim.BFGS()
+    opm = Optim.optimize(func, [ε, ε], [1-ε, 1/ε], init, Optim.Fminbox(optimizer))
+    # opm = Optim.optimize(func, [ε, ε], [1-ε, 1/ε], init, Optim.Fminbox(optimizer); autodiff=:forward)
+    res = Optim.minimizer(opm)
+
+    if vars == :all
+        hurst, σ = res[1], res[2]
+    elseif vars == :hurst
+        hurst = res[1]
+    else
+        σ = res[2]
+    end
+
+    return (hurst, σ), opm
+end
+
