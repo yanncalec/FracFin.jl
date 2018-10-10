@@ -26,7 +26,7 @@ As example, for `trans = x -> vec(x)` the data on a rolling window is put into a
 function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, p::Int, (w,d,n)::Tuple{Int,Int,Int}, trans::Function=(x->vec(x)); mode::Symbol=:causal) where {T<:Real}
     L = (n-1)*d + w  # size of rolling window
     res = []
-    X = reshape(X0, ndims(X0)>1 ? size(X0,1) : 1, :)  # vec to matrix, create a reference not a copy
+    X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
     
     if mode == :causal
         for t = size(X,2):-p:1
@@ -207,6 +207,7 @@ function MLE_prepare_data(X0::AbstractVecOrMat{T}, (w,d,n)::Tuple{Int,Int,Int}) 
     N = (n==0) ? size(X1,2) : min(n, size(X1,2))
     return view(X1, :, 1:N)  # down-sampling and truncation
 end
+
 
 """
 Safe evaluation of the inverse quadratic form
