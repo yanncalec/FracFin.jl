@@ -32,7 +32,11 @@ function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, p::Int, (w,d,n)
         for t = size(X,2):-p:1
             xs = hcat([trans(X[:,(t-i-w+1):(t-i)]) for i in d*(n-1:-1:0) if t-i>=w]...) # concatenation of column vectors
             if length(xs) > 0
-                pushfirst!(res, (t,estim(squeeze(xs))))
+                # if ndims(squeeze(xs))==1
+                #     println("t=$t, size=$(size(xs))")
+                # end
+                # pushfirst!(res, (t,estim(squeeze(xs))))
+                pushfirst!(res, (t,estim(xs)))
             end
         end
         # return [func(X[n+widx]) for n=1:p:length(X) if n+widx[end]<length(X)]
@@ -309,13 +313,14 @@ end
 """
 H-dependent log-likelihood of fraction wavelet noise (fWn) with optimal σ.
 """
-function fWn_log_likelihood_H(X::AbstractMatrix{T}, F::AbstractVector{<:AbstractVector{T}}, H::Real) where {T<:Real}
+function fWn_log_likelihood_H(X::AbstractVecOrMat{T}, F::AbstractVector{<:AbstractVector{T}}, H::Real) where {T<:Real}
     @assert 0 < H < 1
     @assert size(X,1) % length(F) == 0
     
     Σ = Matrix(Symmetric(fWn_covmat(F, size(X,1)÷length(F)-1, H)))
     return log_likelihood_H(Σ, X)
 end
+
 
 """
 General fWn-MLE of Hurst exponent and volatility.
@@ -334,7 +339,7 @@ General fWn-MLE of Hurst exponent and volatility.
 # Notes
 - X can also be the concatenation of vectors at at consecutive instants.
 """
-function fWn_MLE_estim(X::AbstractMatrix{T}, F::AbstractVector{<:AbstractVector{T}}; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
+function fWn_MLE_estim(X::AbstractVecOrMat{T}, F::AbstractVector{<:AbstractVector{T}}; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
     @assert 0. < ε < 1.
     @assert size(X,1) % length(F) == 0
 
@@ -373,7 +378,7 @@ fWn-MLE based on B-Spline wavelet transform.
 - sclrng: integer scales of DCWT
 - v: vanishing moments of B-Spline wavelet
 """
-function fBm_bspline_MLE_estim(X::AbstractMatrix{T}, sclrng::AbstractVector{Int}, v::Int; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
+function fBm_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVector{Int}, v::Int; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
     F = [_intscale_bspline_filter(s, v)/sqrt(s) for s in sclrng]  # extra 1/sqrt(s) factor due to the implementation of DCWT
     return fWn_MLE_estim(X, F; method=method, ε=ε)
 end
@@ -485,7 +490,7 @@ end
 """
 B-Spline wavelet-MLE estimator.
 """
-function fBm_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVector{Int}, v::Int, mode::Symbol; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
+function fBm_bspline_DCWT_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVector{Int}, v::Int, mode::Symbol; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
     @assert size(X,1) % length(sclrng) == 0
     # number of wavelet coefficient vectors concatenated into one column of X
     L = size(X,1) ÷ length(sclrng)  # integer division: \div

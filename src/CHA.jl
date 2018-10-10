@@ -394,13 +394,8 @@ Continuous wavelet transform based on quadrature.
 - wfunc: function for evaluation of wavelet at integer scales
 - sclrng: range of integer scales
 - mode: mode of convolution {:left, :center, :right} or {:causal, :valid, :anticausal}
-
-# Notes
-- This function implements the discretized cwt (DCWT), defined as
-    w[m,k] = 1/\sqrt{k} \sum_n X[n]\psi(\frac{m-n}{k})
-for the transform at integer scale k and position m.
 """
-function cwt_quad(x::Vector{Float64}, wfunc::Function, sclrng::AbstractVector{Int}, mode::Symbol)
+function cwt_quad(x::AbstractVector{T}, wfunc::Function, sclrng::AbstractVector{Int}, mode::Symbol) where {T<:Real}
     Ns = length(sclrng)
     Nx = length(x)
 
@@ -412,7 +407,7 @@ function cwt_quad(x::Vector{Float64}, wfunc::Function, sclrng::AbstractVector{In
         km, vm = convmask(Nx, length(f), mode)
 
         Y = conv(x, f[end:-1:1])
-        dc[:,n] = Y[km] / sqrt(k)
+        dc[:,n] = Y[km] / √k  # 1/√k factor: see definition of DCWT
         mc[:,n] = vm[km]
     end
     return dc, mc
@@ -490,6 +485,20 @@ function _intscale_haar_filter(scl::Int)
 end
 
 
+mexhat(t::Real) = -exp(-t^2) * (4t^2-2t) / (2*sqrt(2π))
+
+function _intscale_mexhat_filter(k::Int)
+    return _intscale_wavelet_filter(k, mexhat, (-5.,5.), 2)  # Mexhat has two vanishing moments
+end
+
+"""
+Continous Mexican hat transform
+"""
+function cwt_mexhat(x::Vector{Float64}, sclrng::AbstractVector{Int}, mode::Symbol=:center)
+    return cwt_quad(x, _intscale_mexhat_filter, sclrng, mode)
+end
+
+
 # """
 # Compute B-Spline filters of `v` vanishing moments at scale `2k`.
 # """
@@ -556,28 +565,14 @@ function cwt_bspline(x::Vector{Float64}, sclrng::AbstractVector{Int}, v::Int, mo
 end
 
 
-mexhat(t::Real) = -exp(-t^2) * (4t^2-2t) / (2*sqrt(2π))
-
-function _intscale_mexhat_filter(k::Int)
-    return _intscale_wavelet_filter(k, mexhat, (-5.,5.), 2)  # Mexhat has two vanishing moments
-end
-
-"""
-Continous Mexican hat transform
-"""
-function cwt_mexhat(x::Vector{Float64}, sclrng::AbstractVector{Int}, mode::Symbol=:center)
-    return cwt_quad(x, _intscale_mexhat_filter, sclrng, mode)
-end
-
-
 """
 Evaluate the Fourier transform of a centered B-Spline wavelet.
 
 # Notes
 - Convention of Fourier transform: 
-    \hat{f}(ω) = 1/√2π ∫f(t)e^{iωt} dt
+    F(ω) = 1/√2π \\int f(t)e^{iωt} dt
 - Convention of Fourier transform: 
-    f(t) = 1/√2π ∫\hat{f}(ω)e^{-iωt} dω
+    f(t) = 1/√2π \\int F(ω)e^{-iωt} dω
 """
 function _bspline_ft(ω::Real, v::Int)
     #     @assert v>0  # check vanishing moment
