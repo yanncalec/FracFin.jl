@@ -13,7 +13,7 @@ Rolling window estimator for 1d or multivariate time series.
 - X0: input, 1d or 2d array with each column being one observation
 - p: step of the rolling window
 - (w,d,n): size of sub-window; length of decorrelation (no effect if `n==1`); number of sub-windows per rolling window
-- trans: function of transformation, optional
+- trans: function of transformation which  optional
 
 # Returns
 - array of estimations on the rolling window
@@ -32,11 +32,9 @@ function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, p::Int, (w,d,n)
         for t = size(X,2):-p:1
             xs = hcat([trans(X[:,(t-i-w+1):(t-i)]) for i in d*(n-1:-1:0) if t-i>=w]...) # concatenation of column vectors
             if length(xs) > 0
-                # if ndims(squeeze(xs))==1
-                #     println("t=$t, size=$(size(xs))")
-                # end
-                # pushfirst!(res, (t,estim(squeeze(xs))))
-                pushfirst!(res, (t,estim(xs)))
+                TODO: sdims = tuple((d for d in 1:ndims(A) if size(A, d) == 1)...)  # singleton dimensions
+
+                pushfirst!(res, (t,estim(squeeze(xs))))
             end
         end
         # return [func(X[n+widx]) for n=1:p:length(X) if n+widx[end]<length(X)]
@@ -75,8 +73,9 @@ Power-law estimator for Hurst exponent and volatility.
 # Returns
 - (hurst, σ), ols: estimation of Hurst and volatility, as well as the GLM ols object.
 """
-function fBm_powlaw_estim(X::AbstractVector{T}, lags::AbstractArray{Int}, p::T=2.) where {T<:Real}
+function fBm_powlaw_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, p::T=2.) where {T<:Real}
     @assert length(lags) > 1 && all(lags .> 1)
+    @assert p > 0.
 
     C = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
 
@@ -128,13 +127,19 @@ function fBm_bspline_scalogram_estim(S::AbstractVector{T}, sclrng::AbstractVecto
     # return hurst, σ
 end
 
-function fBm_bspline_scalogram_estim(W::AbstractMatrix{T}, sclrng::AbstractVector{Int}, v::Int; dims::Int=1, mode::Symbol=:center) where {T<:Real}
-    return fBm_bspline_scalogram_estim(var(W,dims), sclrng, v; mode=mode)
-end
+# """
+# B-Spline scalogram estimator with a matrix of DCWT coefficients as input. Each column in `W` is a vector of DCWT coefficients.
+# """
+# function fBm_bspline_scalogram_estim(W::AbstractMatrix{T}, sclrng::AbstractVector{Int}, v::Int; dims::Int=1, mode::Symbol=:center) where {T<:Real}
+#     return fBm_bspline_scalogram_estim(var(W,dims), sclrng, v; mode=mode)
+# end
 
-function fBm_bspline_scalogram_estim(W::AbstractVector{T}, sclrng::AbstractVector{Int}, v::Int; mode::Symbol=:center) where {T<:AbstractVector{<:Real}}
-    return fBm_bspline_scalogram_estim([var(w) for w in W], sclrng, v; mode=mode)
-end
+# """
+# B-Spline scalogram estimator with an array of DCWT coefficients as input. Each row in `W` corresponds to a scale.
+# """
+# function fBm_bspline_scalogram_estim(W::AbstractVector{T}, sclrng::AbstractVector{Int}, v::Int; mode::Symbol=:center) where {T<:AbstractVector{<:Real}}
+#     return fBm_bspline_scalogram_estim([var(w) for w in W], sclrng, v; mode=mode)
+# end
 
 
 """
@@ -263,15 +268,16 @@ function log_likelihood_H(A::AbstractMatrix{T}, X::AbstractVecOrMat{T}, ε::Real
     return val - length(X)*log(2π*ℯ/length(X))/2  # with the constant part
 end
 
-# function log_likelihood_H(A::AbstractMatrix{T}, X::AbstractVecOrMat{T}, ε::Real=0) where {T<:Real}
-#     @assert issymmetric(A)
-#     @assert size(X, 1) == size(A, 1)
 
-#     N = ndims(X)>1 ? size(X,2) : 1
-#     # d = size(X,1), such that N*d == length(X)
+function log_likelihood(A::AbstractMatrix{T}, X::AbstractVecOrMat{T}) where {T<:Real}
+    @assert issymmetric(A)
+    @assert size(X, 1) == size(A, 1)
 
-#     return -1/2 * (length(X)*log(xiAx(A,X)) + N*logdet(A))
-# end
+    N = ndims(X)>1 ? size(X,2) : 1
+    # d = size(X,1), # such that N*d == length(X)
+
+    return -1/2 * (N*logdet(A) + xiAx(A,X) + length(X)*log(2π))
+end
 
 
 #### fWn-MLE ####

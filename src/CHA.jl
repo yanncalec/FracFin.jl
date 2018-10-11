@@ -512,9 +512,9 @@ end
 
 
 """
-Integer (even) scale B-Spline filter.
+    _intscale_bspline_filter(scl::Int, v::Int)
 
-This B-Spline filter is defined as the auto-convolution of Haar filter.
+Integer (even) scale B-Spline filter, which is defined as the auto-convolution of Haar filter.
 
 # Notes
 - The true scale is `2k`, like in `_intscale_haar_filter`.
