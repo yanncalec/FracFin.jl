@@ -4,16 +4,57 @@
 #### Rolling window ####
 
 """
+Data preparation for MLE.
+
+The purpose of this function is to break long observations into short ones by assuming they are i.i.d. This helps to reduce the size of the covariance matrix and the complexity of the MLE method.
+
+This function constructs i.i.d. samples from the observation of a (multivariate) process. 
+
+# Args
+- X0: either a vector or a matrix, e.g. a sample trajectory of a fGn process (scalar) or a fWn process (multivariate)
+- w,d,n: 
+
+# Examples
+```julia
+
+julia> wsize, dlen, nobs = 100, 1, 0
+julia> dX = FracFin.MLE_prepare_data(dX0, (wsize, dlen, nobs))
+julia> (hurst_estim, σ_estim0), obj = FracFin.fGn_MLE_estim(dX)
+julia> σ_estim = σ_estim0 / lag^hurst  # obtain true estimation of σ by rescaling
+```
+"""
+function rolling_apply(func::Function, X::AbstractMatrix{T}, s::Int, d::Int=1) where {T<:Real}
+    # @assert s>0
+    return if s<=size(X,2)
+            hcat([func(X[:,t:t+s-1]) for t=1:d:size(X,2)-s+1]...)
+        else 
+            []
+        end    
+    # # X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
+    # @assert size(X,2) >= s > 0  # valid window size
+    # return hcat([trans(X[:,t:t+s-1]) for t=1:d:size(X,2) if t+s-1<=size(X,2)]...)  # put into a matrix form
+    # # N = (n==0) ? size(X1,2) : min(n, size(X1,2))
+    # # return view(X1, :, 1:N)  # down-sampling and truncation
+end
+
+
+function rolling_apply(func::Function, X::AbstractVector{T}, s::Int, d::Int=1) where {T<:Real}
+    return rolling_apply(func, reshape(X,1,:), s, d)
+end
+
+
+"""
     rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, p::Int, (w,d,n)::Tuple{Int,Int,Int}, trans::Function=(x->vec(x)); mode::Symbol=:causal) where {T<:Real}
 
 Rolling window estimator for 1d or multivariate time series.
 
 # Args
-- estim: estimator
+- estim: estimator which accepts either 1d or 2d array
 - X0: input, 1d or 2d array with each column being one observation
 - p: step of the rolling window
 - (w,d,n): size of sub-window; length of decorrelation (no effect if `n==1`); number of sub-windows per rolling window
-- trans: function of transformation which  optional
+- trans: function of transformation which returns a vector of fixed size or a scalar,  optional
+- mode: :causal or :anticausal
 
 # Returns
 - array of estimations on the rolling window
@@ -23,26 +64,27 @@ The estimator is applied on a rolling window every `p` steps. The rolling window
 
 As example, for `trans = x -> vec(x)` the data on a rolling window is put into a new matrix of dimension `w*q`-by-`n`, and its columns are the column-concatenantions of data on the sub-window. Moreover, different columns of this new matrix are assumed as i.i.d. observations.
 """
-function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, p::Int, (w,d,n)::Tuple{Int,Int,Int}, trans::Function=(x->vec(x)); mode::Symbol=:causal) where {T<:Real}
-    L = (n-1)*d + w  # size of rolling window
+function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, (w,s,d)::Tuple{Int,Int,Int}, p::Int, trans::Function=(x->vec(x)); mode::Symbol=:causal) where {T<:Real}
+    # L = (n-1)*d + w  # size of rolling window
+    
     res = []
     X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
-    
-    if mode == :causal
-        for t = size(X,2):-p:1
-            xs = hcat([trans(X[:,(t-i-w+1):(t-i)]) for i in d*(n-1:-1:0) if t-i>=w]...) # concatenation of column vectors
-            if length(xs) > 0
-                TODO: sdims = tuple((d for d in 1:ndims(A) if size(A, d) == 1)...)  # singleton dimensions
+    @assert size(X,2) >= w >= s
 
-                pushfirst!(res, (t,estim(squeeze(xs))))
+    if mode == :causal  # causal
+        for t = size(X,2):-p:1
+            xs = rolling_apply(trans, X[:,t:-1:max(1, t-w+1)], s, d)
+            # xs = hcat([trans(X[:,(t-i-w+1):(t-i)]) for i in d*(n-1:-1:0) if t-i>=w]...) # concatenation of column vectors
+            if length(xs) > 0
+                pushfirst!(res, (t,estim(squeezedims(xs))))  # <- Bug: this may give 0-dim array when apply on 1d row vector
             end
         end
-        # return [func(X[n+widx]) for n=1:p:length(X) if n+widx[end]<length(X)]
-    else
-        for t = 1:p:size(X,2)-L+1
-            xs = hcat([trans(X[:, (t+i):(t+i+w-1)]) for i in d*(0:n-1) if t+i+w-1<=length(X)]...)
+    else  # anticausal
+        for t = 1:p:size(X,2)
+            xs = rolling_apply(trans, X[:,t:min(size(X,2), t+w-1)], s, d)
+            # xs = hcat([trans(X[:, (t+i):(t+i+w-1)]) for i in d*(0:n-1) if t+i+w-1<=length(X)]...)
             if length(xs) > 0
-                push!(res, (t,estim(squeeze(xs))))
+                push!(res, (t,estim(squeezedims(xs))))
             end
         end
     end
@@ -50,10 +92,21 @@ function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, p::Int, (w,d,n)
 end
 
 
-function rolling_estim(func::Function, X0::AbstractVecOrMat{T}, p::Int, w::Int, trans::Function=(x->x); mode::Symbol=:causal) where {T<:Real}
-    return rolling_estim(func, X0, p, (w,1,1), trans; mode=mode)
+function rolling_estim(func::Function, X0::AbstractVecOrMat{T}, w::Int, p::Int, trans::Function=(x->x); mode::Symbol=:causal) where {T<:Real}
+    return rolling_estim(func, X0, (w,w,1), p, trans; mode=mode)
 end
 
+
+"""
+Rolling mean in row direction.
+"""
+function rolling_mean(X0::AbstractVecOrMat{T}, w::Int, d::Int=1) where {T<:Real}
+    return rolling_apply(x->mean(x, dims=2), X0, w, d)
+end
+
+function rolling_vectorize(X0::AbstractVecOrMat{T}, w::Int, d::Int=1) where {T<:Real}
+    return rolling_apply(x->vec(x), X0, w, d)
+end
 
 ######## Estimators for fBm ########
 
@@ -186,36 +239,6 @@ end
 
 
 ###### MLE ######
-
-"""
-Data preparation for MLE.
-
-This function constructs i.i.d. samples from the observation of a (multivariate) process. 
-
-# Args
-- X0: either a vector or a matrix, e.g. a sample trajectory of a fGn process (scalar) or a fWn process (multivariate)
-- w,d,n: 
-
-# Notes
-- MLE method in general is computationally expensive high dimension data, due to the size of the covariance matrix. One can use this function is to break long observations into short ones by assuming they are i.i.d.
-
-# Examples
-```julia
-
-julia> wsize, dlen, nobs = 100, 1, 0
-julia> dX = FracFin.MLE_prepare_data(dX0, (wsize, dlen, nobs))
-julia> (hurst_estim, σ_estim0), obj = FracFin.fGn_MLE_estim(dX)
-julia> σ_estim = σ_estim0 / lag^hurst  # obtain true estimation of σ by rescaling
-```
-"""
-function MLE_prepare_data(X0::AbstractVecOrMat{T}, (w,d,n)::Tuple{Int,Int,Int}) where {T<:Real}
-    if ndims(X0)==1
-        X0 = reshape(X0, 1, :)
-    end
-    X1 = hcat([vec(X0[:,t:t+w-1]) for t=1:d:size(X0,2) if t+w-1<=size(X0,2)]...)  # put into a matrix form
-    N = (n==0) ? size(X1,2) : min(n, size(X1,2))
-    return view(X1, :, 1:N)  # down-sampling and truncation
-end
 
 
 """
@@ -393,10 +416,23 @@ end
 #### fGn-MLE ####
 # A special case of fWn-MLE which deserves it own implementation.
 
-function fGn_log_likelihood_H(X::AbstractVecOrMat{T}, H::Real) where {T<:Real}
+function covmat(s::AbstractVector{T}) where {T<:Real}
+    [s[abs(n-m)+1] for n=1:length(s), m=1:length(s)]
+end
+
+function fGn_covfunc(H::Real, n::Int, d::Int)
+    return 1/2 * (abs(n+d)^(2H) + abs(n-d)^(2H) - 2*abs(n)^(2H))
+end
+
+fGn_covseq(H::Real, lags::AbstractVector{Int}, d::Int) where {T<:Real} = [fGn_covfunc(H,n,d) for n in lags]
+                               
+fGn_covmat(H::Real, N::Int, d::Int) = covmat(fGn_covseq(H, 0:N-1, d))
+
+function fGn_log_likelihood_H(X::AbstractVecOrMat{T}, H::Real, d::Int) where {T<:Real}
     @assert 0 < H < 1
 
-    Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(H, 1.), size(X,1))))
+    # Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(H, 1.), size(X,1))))
+    Σ = Matrix(Symmetric(fGn_covmat(H, size(X,1), d)))
     return log_likelihood_H(Σ, X)
 end
 
@@ -406,11 +442,15 @@ Maximum likelihood estimation of Hurst exponent and volatility using fractional 
 
 # Args
 - X: observation vector or matrix of a fGn process. For matrix input each column is an i.i.d. observation.
-- method, ε: see `fWn_MLE_estim()`
+- d: time-lag of the finite difference operator used for computing `X`.
+- method, ε: see `fWn_MLE_estim()`.
+
+# Notes
+- This method is very expensive for data of large dimensions, see docs in `MLE_prepare_data()`.
 """
-function fGn_MLE_estim(X::AbstractVecOrMat{T}; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
+function fGn_MLE_estim(X::AbstractVecOrMat{T}, d::Int; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
     @assert 0. < ε < 1.
-    func = h -> -fGn_log_likelihood_H(X, h)
+    func = h -> -fGn_log_likelihood_H(X, h, d)
 
     opm = nothing
     hurst = nothing
@@ -429,11 +469,33 @@ function fGn_MLE_estim(X::AbstractVecOrMat{T}; method::Symbol=:optim, ε::Real=1
         throw("Unknown method: ", method)
     end
     
-    Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(hurst, 1.), size(X,1))))
+    # Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(hurst, 1.), size(X,1))))
+    Σ = Matrix(Symmetric(fGn_covmat(hurst, size(X,1), d)))
     σ = sqrt(xiAx(Σ, X) / length(X))
     L = log_likelihood_H(Σ, X)
 
     return (hurst, σ), L, opm
+end
+
+
+"""
+TODO
+"""
+function msfGn_MLE_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, (w,d)::Tuple{Int,Int}) where {T<:Real}
+    Hs = zeros(length(lags))
+    Σs = zeros(length(lags))
+
+    for (n,lag) in enumerate(lags)  # time lag for finite difference
+        dXm = mean(vec2mat(X[lag+1:end]-X[1:end-lag], lag), dims=1)
+        dX = squeezedims(rolling_vectorize(dXm, w, d))
+        # println(size(dX))
+        (hurst_estim, σ_estim), obj = fGn_MLE_estim(dX, 1)
+        # # σ_estim = σ_estim0 / lag^hurst_estim  # obtain true estimation of σ by rescaling
+
+        Hs[n] = hurst_estim
+        Σs[n] = σ_estim
+    end
+    return Hs, Σs
 end
 
 

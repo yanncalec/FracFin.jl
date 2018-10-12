@@ -1,20 +1,46 @@
 ########## Utility functions ##########
 
-##### Algebra #####
+##### Useful functions #####
+
+"""
+Sigmoid function.
+"""
+sigmoid(α::Real) = exp(α)/(1+exp(α))
+
+"""
+Derivative of sigmoid function.
+"""
+diff_sigmoid(α::Real) = exp(α)/(1+2*exp(α)+exp(2α))
+
+
+"""
+Remove singular dimensions
+"""
+function squeezedims(A::AbstractArray{T}) where {T<:Real}
+    dims = tuple(findall(size(A).==1)...)
+    return length(dims)>0 ? dropdims(A, dims=dims) : A
+end
+
 
 ifloor(x::Int, y::Int) = floor(Int, x/y) * y
 # ifloor(x::Int, y::Int) = x - (x%y)
 iceil(x::Int, y::Int) = ceil(Int, x/y) * y
 
 
-# function make_rolling_data(X::AbstractVecOrMat{T}, w::Int) where {T<:Real}
-#     d::Int = ndims(X)>1 ? size(X,1) : 1
-#     Y = zeros(T, (w,size(X,)))
-#     view(X, :, 1)[]
-#     return reshape(X[:][1:ifloor(length(X), w*d)], w*d, :)
-# end
+"""
+    vec2mat(x::AbstractVector{T}, r::Int) where {T<:Real}
 
-function norm(X::AbstractMatrix, p::Real=2; dims::Int=1)
+Reshape a vector `x` to a matrix of `r` rows with truncation if `length(x)` does not divide `r`.
+"""
+function vec2mat(x::AbstractVector{T}, r::Int) where {T<:Real}
+    @assert r<=length(x)  # number of row must be smaller than the size of x
+    n = length(x) - (length(x)%r)
+    return reshape(x[1:n], r, :)
+end
+
+##### Algebra #####
+
+function norm(X::AbstractMatrix{T}, p::Real=2; dims::Int=1) where {T<:Number}
     if dims==1
         return [LinearAlgebra.norm(X[:,n],p) for n=1:size(X,2)]
     else
@@ -23,7 +49,7 @@ function norm(X::AbstractMatrix, p::Real=2; dims::Int=1)
 end
 
 
-function pinv_iter(A::AbstractMatrix, method::Symbol=:lsqr)
+function pinv_iter(A::AbstractMatrix{T}, method::Symbol=:lsqr) where {T<:Number}
     iA = zeros(Float64, size(A'))
     try
         iA = pinv(A)
@@ -64,7 +90,7 @@ the covariance sequence of a stationary process.
 # Explanation
 `pseq` forms the lower triangular matrix diagonalizing the covariance matrix Γ, and `sseq` forms the resulting diagonal matrix. `rseq[n]` is just `pseq[n][n]`.
 """
-function LevinsonDurbin(cseq::Vector{Float64})
+function LevinsonDurbin(cseq::AbstractVector{T}) where {T<:Real}
     N = length(cseq)
 
     if N > 1
@@ -103,7 +129,7 @@ LevinsonDurbin(p::StationaryProcess{T}, g::RegularGrid{<:T}) where T = LevinsonD
 """
 Cholesky decomposition based on SVD.
 """
-function chol_svd(W::Matrix{Float64})
+function chol_svd(W::AbstractMatrix{T}) where {T<:Real}
     Um, Sm, Vm = svd((W+W')/2)  # svd of forced symmetric matrix
     Ss = sqrt.(Sm[Sm.>0])  # truncation of negative singular values
     return Um*diagm(Ss)
@@ -124,11 +150,11 @@ end
 
 vandermonde(nrow::Int, ncol::Int) = vandermonde((nrow, ncol))
 
-function col_normalize(A::Matrix, p::Real=2)
+function col_normalize(A::AbstractMatrix{T}, p::Real=2) where {T<:Real}
     return A / diagm([norm(A[:,n], p) for n=1:size(A,2)])
 end
 
-function col_normalize!(A::Matrix, p::Real=2)
+function col_normalize!(A::AbstractMatrix{T}, p::Real=2) where {T<:Real}
     for n=1:size(A,2)
         A[:,n] ./= norm(A[:,n], p)
     end
@@ -138,31 +164,3 @@ end
 row_normalize(A) = col_normalize(transpose(A))
 row_normalize!(A) = col_normalize!(transpose(A))
 
-
-##### Useful functions #####
-
-"""
-Sigmoid function.
-"""
-sigmoid(α::Real) = exp(α)/(1+exp(α))
-
-"""
-Derivative of sigmoid function.
-"""
-diff_sigmoid(α::Real) = exp(α)/(1+2*exp(α)+exp(2α))
-
-
-"""
-Remove singular dimensions
-"""
-function squeeze(A::AbstractArray)
-    nd = size(A)    
-    for (n,d) in enumerate(nd)
-        if d==1
-            A = dropdims(A,dims=n)
-        end
-    end
-    return A
-end
-    
-    
