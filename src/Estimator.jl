@@ -1,106 +1,6 @@
 ######### Estimators for fractional processes #########
 
 
-#### Rolling window ####
-
-"""
-Apply a function on a rolling window with hard truncation at boundaries.
-"""
-function rolling_apply_hard(func::Function, X0::AbstractVecOrMat{T}, s::Int, d::Int=1; mode::Symbol=:causal) where {T<:Real}
-    # @assert s>0
-    X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
-    L = size(X,2)
-    return if mode==:causal            
-        hcat(reverse([func(X[:,t-s+1:t]) for t=L:-d:s])...)
-    else  # anti-causal
-        hcat([func(X[:,t:t+s-1]) for t=1:d:L-s+1]...)
-    end
-end
-
-"""
-Apply a function on a rolling window with soft truncation at boundaries.
-"""
-function rolling_apply_soft(func::Function, X0::AbstractVecOrMat{T}, s::Int, d::Int=1; mode::Symbol=:causal) where {T<:Real}
-    # @assert s>0
-    X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
-    L = size(X,2)
-    return if mode==:causal            
-        hcat(reverse([func(X[:,max(1,t-s+1):t]) for t=L:-d:1])...)
-    else  # anti-causal
-        hcat([func(X[:,t:min(L,t+s-1)]) for t=1:d:L]...)
-    end
-end
-
-
-"""
-    rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, (w,s,d)::Tuple{Int,Int,Int}, p::Int, trans::Function=(x->vec(x)); mode::Symbol=:causal) where {T<:Real}
-
-Rolling window estimator for 1d or multivariate time series.
-
-# Args
-- estim: estimator which accepts either 1d or 2d array
-- X0: input, 1d or 2d array with each column being one observation
-- (w,s,d): size of rolling window; size of sub-window, length of decorrelation
-- p: step of the rolling window
-- trans: function of transformation which returns a vector of fixed size or a scalar,  optional
-- mode: :causal or :anticausal
-
-# Returns
-- array of estimations on the rolling window
-
-# Notes
-- The estimator is applied on a rolling window every `p` steps. The rolling window is divided into `n` (possibly overlapping) sub-windows of size `w` at the pace `d`, such that the size of the rolling window equals to `(n-1)*d+w`. For q-variates time series, data on a sub-window is a matrix of dimension `q`-by-`w` which is further transformed by the function `trans` into another vector. The transformed vectors of `n` sub-windows are concatenated into a matrix which is finally passed to the estimator `estim`. As example, for `trans = x -> vec(x)` the data on a rolling window is put into a new matrix of dimension `w*q`-by-`n`, and its columns are the column-concatenantions of data on the sub-window. Moreover, different columns of this new matrix are assumed as i.i.d. observations.
-- Boundary is treated in a soft way.
-"""
-function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, (w,s,d)::Tuple{Int,Int,Int}, p::Int, trans::Function=(x->vec(x)); mode::Symbol=:causal) where {T<:Real}    
-    X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
-    L = size(X,2)
-    @assert L >= w >= s
-    res = []
-
-    if mode == :causal  # causal
-        for t = L:-p:1
-            xs = rolling_apply_hard(trans, X[:,t:-1:max(1, t-w+1)], s, d; mode=mode)
-            if length(xs) > 0
-                pushfirst!(res, (t,estim(squeezedims(xs))))  # <- Bug: this may give 0-dim array when apply on 1d row vector
-            end
-        end
-    else  # anticausal
-        for t = 1:p:L
-            xs = rolling_apply_hard(trans, X[:,t:min(L, t+w-1)], s, d; mode=mode)
-            if length(xs) > 0
-                push!(res, (t,estim(squeezedims(xs))))
-            end
-        end
-    end
-    return res
-end
-
-
-function rolling_estim(func::Function, X0::AbstractVecOrMat{T}, w::Int, p::Int, trans::Function=(x->x); mode::Symbol=:causal) where {T<:Real}
-    return rolling_estim(func, X0, (w,w,1), p, trans; mode=mode)
-end
-
-
-"""
-Rolling mean in row direction.
-"""
-function rolling_mean(X0::AbstractVecOrMat{T}, w::Int, d::Int=1; boundary::Symbol=:hard) where {T<:Real}
-    return if boundary == :hard
-        rolling_apply_hard(x->mean(x, dims=2), X0, w, d)
-    else
-        rolling_apply_soft(x->mean(x, dims=2), X0, w, d)
-    end
-end
-
-
-"""
-Rolling vectorization.
-"""
-function rolling_vectorize(X0::AbstractVecOrMat{T}, w::Int, d::Int=1) where {T<:Real}
-    return rolling_apply_hard(x->vec(x), X0, w, d)
-end
-
 ######## Estimators for fBm ########
 
 """
@@ -303,7 +203,7 @@ end
 Compute the covariance matrix of a fWn at some time lag.
 
 # Args
-- F: array of filters
+- F: array of band pass filters (no DC component)
 - l: time lag
 - H: Hurst exponent
 """
@@ -389,6 +289,20 @@ function fWn_MLE_estim(X::AbstractVecOrMat{T}, F::AbstractVector{<:AbstractVecto
     L = log_likelihood_H(Σ, X)
     
     return (hurst, σ), L, opm
+end
+
+
+"""
+fWn-MLE based on B-Spline wavelet transform.
+
+# Args
+- X: DCWT coefficients, each column corresponding to a vector of coefficients. See `cwt_bspline()`.
+- sclrng: integer scales of DCWT
+- v: vanishing moments of B-Spline wavelet
+"""
+function fBm_swt_MLE_estim(X::AbstractVecOrMat{T}, wvl::String, level::Int; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
+    F = [_intscale_bspline_filter(s, v)/sqrt(s) for s in sclrng]  # extra 1/sqrt(s) factor due to the implementation of DCWT
+    return fWn_MLE_estim(X, F; method=method, ε=ε)
 end
 
 

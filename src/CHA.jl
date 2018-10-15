@@ -386,6 +386,10 @@ function iswt(ac::AbstractVector{T}, dc::AbstractMatrix{T}, wvl::String, mask::A
 end
 
 
+# function dyadic_wavelet_filters()
+    
+# end
+
 """
 Continuous wavelet transform based on quadrature.
 
