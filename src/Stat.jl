@@ -65,6 +65,16 @@ function cov(X::AbstractVecOrMat, Y::AbstractVecOrMat, w::StatsBase.AbstractWeig
 end
 
 
+"""
+Robust estimator of variance
+"""
+function robustvar(X::AbstractArray{T}; dims::Int=1) where {T<:Number}
+    lqt = -0.393798799600891  # log of 3/4 quantil of standard normal distribution
+    Q = log.((X .- mean(X, dims=dims)).^2)
+    return exp.(median(Q, dims=dims) .- 2lqt)
+end
+
+
 ######## Linear models ########
 """
 Multi-linear regression in the column direction. 
