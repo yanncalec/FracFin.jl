@@ -398,15 +398,17 @@ function ms_fGn_MLE_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, w::In
     Σs = zeros(length(lags))
 
     for (n,lag) in enumerate(lags)  # time lag for finite difference
-        dXo = rolling_vectorize(X[lag+1:end]-X[1:end-lag], w, 1)
-        dXm = rolling_mean(dXo, 2lag, lag; boundary=:hard)
-        dX = squeezedims(dXm)
-        # println(size(dXm))
-        (hurst_estim, σ_estim), obj = fGn_MLE_estim(dX, lag)
+        # vectorization with window size w
+        dXo = rolling_vectorize(X[lag+1:end]-X[1:end-lag], w, 1)  
+        # rolling mean with window size 2lag, then down-sample at step lag
+        dX = rolling_mean(dXo, 2lag, lag; boundary=:hard)  
+
+        (hurst_estim, σ_estim), obj = fGn_MLE_estim(squeezedims(dX), lag)
 
         Hs[n] = hurst_estim
         Σs[n] = σ_estim
     end
+
     return Hs, Σs
 end
 
