@@ -3,30 +3,28 @@ __precompile__()
 using ArgParse
 using Formatting
 
-# push!(LOAD_PATH, "/home/han/Codes/Development")
+using Plots
+# pyplot(reuse=true, size=(900,300))
+pyplot()
+set_theme(:ggplot2)
 
 # using LinearAlgebra
 # using PyCall
 
-import FracFin
 # import DataFrames
 # import DSP
 # import GLM
 # import Optim
 # import ForwardDiff
 # import CSV
-# import TimeSeries
-# import Dates
+import TimeSeries
+import Dates
 # import StatsBase
 
 # import PyPlot; const plt = PyPlot
 # plt.plt[:style][:use]("ggplot")
 
-# using Plots
-# # pyplot(reuse=true, size=(900,300))
-# pyplot()
-# set_theme(:ggplot2)
-
+import FracFin
 
 function prepare_data_for_estimator(X0::AbstractVector{T}, dlag::Int) where {T<:Real}
     dX = zero(X0)  # fGn estimator is not friendly with NaN
@@ -82,6 +80,9 @@ function parse_commandline()
             help = "index of the column to be analyzed, if the input file contains multiple columns"
             arg_type = Int
             default = 1
+        "--verbose", "-v"
+            help = "print message"
+            action = :store_true
         # "cmd"
         #     help = "name of estimator"
         #     action = :command
@@ -109,11 +110,12 @@ function main()
     infile = pargs["infile"]
     outdir0 = pargs["outdir"]
 
-    i1 = something(findlast(isequal('/'), infile), 1)
-    i2 = something(findlast(isequal('.'), infile), length(infile))
-    sname = infile[i1:i2]  # filename without extension
-
+    i1 = something(findlast(isequal('/'), infile), 0)
+    i2 = something(findlast(isequal('.'), infile), length(infile)+1)
+    sname = infile[i1+1:i2-1]  # filename without extension
+    
     # recover parameters
+    intraday = pargs["intraday"]
     wsize = pargs["wsize"]  # size of rolling window
     ssize = pargs["ssize"]  # size of i.i.d. sub-window
     dlen = pargs["dlen"]  # length of decorrelation
@@ -121,16 +123,21 @@ function main()
     dlag = pargs["dlag"]  # time-lag of finite difference
     # tfmt = pargs["tfmt"]  # time format
     ncol = pargs["ncol"]  # index of column
+    verbose = pargs["verbose"]
 
     # make the output folder
     outstr = format("wsize[{}]_ssize[{}]_dlen[{}]_pov[{}]_dlag[{}]", wsize, ssize, dlen, pov, dlag)
     outdir = format("{}/{}/{}/fGn-MLE/{}/", outdir0, sname, ncol, outstr)
     try
         mkpath(outdir)
+        mkpath(outdir * "/csv/")
     catch
     end
-
+    
     # load data
+    if verbose
+        printfmtln("Loading file {}...", infile)
+    end
     # toto = CSV.read(infile)
     toto = TimeSeries.readtimearray(infile, format=pargs["tfmt"], delim=',')
     data0 = TimeSeries.TimeArray(toto.timestamp, toto.values[:,ncol])
@@ -138,13 +145,18 @@ function main()
 
     day_start = TimeSeries.Date(data.timestamp[1])
     day_end = TimeSeries.Date(data.timestamp[end])
-    
+    day_iter = day_start:Dates.Day(1):day_end
+
     # # trunctation
     # data = data0[Dates.DateTime(day_start0):Dates.Minute(1):(Dates.DateTime(day_end0)+Dates.Day(1))];
 
     estim = X -> FracFin.fGn_MLE_estim(X, dlag; method=:optim, ε=1e-2)
     
-    for day in day_start:Dates.Day(1):day_end
+    for (n,day) in enumerate(day_iter)
+        if verbose
+            printfmt("Processing {} of {} days...\r", n, length(day_iter))
+        end
+
         t0 = Dates.DateTime(day)
         t1 = t0+Dates.Day(1)
         D0 = data[t0:Dates.Minute(1):t1]  # Minute or Hours, but Day won't work
@@ -183,9 +195,17 @@ function main()
     #         plot(fig1, fig2a, layout=(2,1), size=(1200,600), legend=true)        
             outfile = format("{}/{}.pdf",outdir, day)
             savefig(outfile)
+
+            At = TimeSeries.TimeArray(T0[tidx], [Ht σt], ["Hurst", "σ"])
+            outfile = format("{}/csv/{}.csv",outdir, day)
+            TimeSeries.writetimearray(At, outfile)
         end
     end
     
+    if verbose
+        printfmtln("Processing the whole dataset...")
+    end
+
     day_start = TimeSeries.Date(data.timestamp[1])
     day_end = TimeSeries.Date(data.timestamp[end]) #-Dates.Day(1)
     
@@ -199,7 +219,7 @@ function main()
     V0 = D0.values[vidx]
     X0 = log.(V0)  # log transformed data
     
-    Xdata = prepare_data_for_estimator(X0)
+    Xdata = prepare_data_for_estimator(X0, dlag)
     
     # estimation of hurst and σ
     res= FracFin.rolling_estim(estim, Xdata, (wsize, ssize, dlen), pov, mode=:causal)
@@ -223,7 +243,7 @@ function main()
     #         plot!(fig2b, T0, σt0, yrightlabel="σ", color=:red, label="σ")                
     #         plot(fig1, fig2a, layout=(2,1), size=(1200,600), legend=true)
     
-    outfile = format("{}/continous-date.pdf",outdir)
+    outfile = format("{}/consolidated-per-day.pdf",outdir)
     savefig(outfile)
     
     title_str = format("{}, wsize={}", sname, wsize)
@@ -234,8 +254,16 @@ function main()
     plot!(fig4, 0.5*ones(length(T0)), w=3, color=:red, label="")
     plot(fig1, fig2, fig3, fig4, layout=(4,1), size=(1200,1000), legend=true)        
     
-    outfile = format("{}/continous.pdf",outdir)
+    outfile = format("{}/consolidated.pdf",outdir)
     savefig(outfile)    
+
+    At = TimeSeries.TimeArray(T0[tidx], [Ht σt], ["Hurst", "σ"])
+    outfile = format("{}/csv/consolidated.csv",outdir)
+    TimeSeries.writetimearray(At, outfile)            
+
+    if verbose
+        printfmtln("Outputs saved in {}", outdir)
+    end
 end
 
 main()

@@ -175,7 +175,8 @@ Rolling window estimator for 1d or multivariate time series.
 function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, (w,s,d)::Tuple{Int,Int,Int}, p::Int, trans::Function=(x->vec(x)); mode::Symbol=:causal) where {T<:Number}    
     X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
     L = size(X,2)
-    @assert L >= w >= s
+    # println(L); println(w); println(s)
+    # @assert w >= s && L >= s
     res = []
 
     if mode == :causal  # causal

@@ -1,6 +1,5 @@
 ######### Estimators for fractional processes #########
 
-
 ######## Estimators for fBm ########
 
 """
@@ -19,7 +18,7 @@ Power-law estimator for Hurst exponent and volatility.
 # Returns
 - (hurst, σ), ols: estimation of Hurst and volatility, as well as the GLM ols object.
 """
-function fBm_powlaw_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, p::T=2.) where {T<:Real}
+function powlaw_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, p::T=2.) where {T<:Real}
     @assert length(lags) > 1 && all(lags .> 1)
     @assert p > 0.
 
@@ -41,7 +40,7 @@ function fBm_powlaw_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, p::T=
 
     return (hurst, σ), ols
 end
-
+const fBm_powlaw_estim = powlaw_estim
 
 ##### Generalized scalogram #####
 
@@ -53,7 +52,7 @@ B-Spline scalogram estimator for Hurst exponent and volatility.
 - sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one row in the matrix X
 - v: vanishing moments
 """
-function fBm_bspline_scalogram_estim(S::AbstractVector{T}, sclrng::AbstractVector{Int}, v::Int; mode::Symbol=:center) where {T<:Real}
+function bspline_scalogram_estim(S::AbstractVector{T}, sclrng::AbstractVector{Int}, v::Int; mode::Symbol=:center) where {T<:Real}
     @assert length(S) == length(sclrng)
 
     df = DataFrames.DataFrame(xvar=log.(sclrng.^2), yvar=log.(S))
@@ -77,6 +76,8 @@ function fBm_bspline_scalogram_estim(S::AbstractVector{T}, sclrng::AbstractVecto
     # σ = exp((η - log(abs(A)))/2)
     # return hurst, σ
 end
+
+const fBm_bspline_scalogram_estim = bspline_scalogram_estim
 
 # """
 # B-Spline scalogram estimator with a matrix of DCWT coefficients as input. Each column in `W` is a vector of DCWT coefficients.
@@ -102,7 +103,7 @@ Generalized B-Spline scalogram estimator for Hurst exponent and volatility.
 - v: vanishing moments
 - r: rational ratio defining a line in the covariance matrix, e.g. r=1 corresponds to the main diagonal.
 """
-function fBm_gen_bspline_scalogram_estim(Σ::AbstractMatrix{T}, sclrng::AbstractVector{Int}, v::Int, r::Rational=1//1; mode::Symbol=:center) where {T<:Real}
+function gen_bspline_scalogram_estim(Σ::AbstractMatrix{T}, sclrng::AbstractVector{Int}, v::Int, r::Rational=1//1; mode::Symbol=:center) where {T<:Real}
     @assert issymmetric(Σ)
     @assert size(Σ,1) == length(sclrng)
     @assert r >= 1
@@ -134,7 +135,7 @@ function fBm_gen_bspline_scalogram_estim(Σ::AbstractMatrix{T}, sclrng::Abstract
     # σ = ℯ^((η - log(abs(Aρ)))/2)
     # return hurst, σ
 end
-
+const fBm_gen_bspline_scalogram_estim = gen_bspline_scalogram_estim
 
 ###### MLE ######
 
@@ -298,14 +299,9 @@ end
 
 
 """
-fWn-MLE based on B-Spline wavelet transform.
-
-# Args
-- X: DCWT coefficients, each column corresponding to a vector of coefficients. See `cwt_bspline()`.
-- sclrng: integer scales of DCWT
-- v: vanishing moments of B-Spline wavelet
+Doc
 """
-function fBm_swt_MLE_estim(X::AbstractVecOrMat{T}, wvl::String, level::Int; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
+function fWn_swt_MLE_estim(X::AbstractVecOrMat{T}, wvl::String, level::Int; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
     F = [_intscale_bspline_filter(s, v)/sqrt(s) for s in sclrng]  # extra 1/sqrt(s) factor due to the implementation of DCWT
     return fWn_MLE_estim(X, F; method=method, ε=ε)
 end
@@ -319,10 +315,11 @@ fWn-MLE based on B-Spline wavelet transform.
 - sclrng: integer scales of DCWT
 - v: vanishing moments of B-Spline wavelet
 """
-function fBm_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVector{Int}, v::Int; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
+function fWn_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVector{Int}, v::Int; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
     F = [_intscale_bspline_filter(s, v)/sqrt(s) for s in sclrng]  # extra 1/sqrt(s) factor due to the implementation of DCWT
     return fWn_MLE_estim(X, F; method=method, ε=ε)
 end
+# const fBm_bspline_MLE_estim = fWn_bspline_MLE_estim
 
 
 #### fGn-MLE ####
