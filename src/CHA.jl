@@ -601,7 +601,6 @@ maxscale_bspline(N::Int, v::Int) = floor(Int, (N+1)/v/2)
 The integrand function of C^ψ_ρ(τ, H) with a centered B-spline wavelet.
 """
 function Cψρ_bspline_integrand_center(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
-    @assert v > H+1/2  # otherwise may raise `DomainError with 0.0`
     return 1/(16^v * 2π) * (ω^2)^(v-(H+1/2)) * (sinc(ω*√ρ/4π)*sinc(ω/√ρ/4π))^(2v) * cos(ω*τ)
 end
 
@@ -618,8 +617,6 @@ Evaluate the integrand function of C^ψ_ρ(τ, H)
 - In Julia the sinc function is defined as `sinc(x)=sin(πx)/(πx)`.
 """
 function Cψρ_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int, mode::Symbol)
-    # @assert ρ>0 && 1>H>0 && v>0
-
     # The integrand is, by definition
     # _bspline_ft(ω*√ρ, v) * conj(_bspline_ft(ω/√ρ, v)) / abs(ω)^(2H+1) * exp(-1im*ω*τ)
     # this should be modulated by
@@ -642,12 +639,14 @@ end
 Evaluate the function C^ψ_ρ(τ,H) by numerical integration.
 """
 function Cψρ_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
+    @assert ρ>0 
+    @assert 1>H>0 
+    @assert v>H+1/2  # otherwise may raise `DomainError with 0.0`
+
     f = ω -> Cψρ_bspline_integrand(τ, ω, ρ, H, v, mode)
     # println("τ=$τ, ρ=$ρ, H=$H, v=$v") #
-    res = QuadGK.quadgk(f, rng...)[1]
-    # res = 1e-4 * sum(f.(rng[1]:1e-4:rng[2]))
-
-    return res
+    return QuadGK.quadgk(f, rng...)[1]
+    # return 1e-4 * sum(f.(rng[1]:1e-4:rng[2]))
 end
 
 

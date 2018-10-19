@@ -60,9 +60,14 @@ function fBm_bspline_scalogram_estim(S::AbstractVector{T}, sclrng::AbstractVecto
     ols = GLM.lm(@GLM.formula(yvar~xvar), df)
     coef = GLM.coef(ols)
 
-    hurst = coef[2]-1/2
-    Aρ = Aρ_bspline(0, 1, hurst, v, mode)
-    σ = exp((coef[1] - log(abs(Aρ)))/2)
+    hurst::Float64 = coef[2]-1/2
+    σ::Float64 = try
+        Aρ = Aρ_bspline(0, 1, hurst, v, mode)
+        exp((coef[1] - log(abs(Aρ)))/2)
+    catch
+        NaN
+    end
+
     return (hurst, σ), ols
 
     # Ar = hcat(xr, ones(length(xr)))  # design matrix
