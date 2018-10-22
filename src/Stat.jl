@@ -183,12 +183,19 @@ function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, (w,s,d)::Tuple{
         for t = L:-p:1
             xv = view(X, :, t:-1:max(1, t-w+1))
             xs = if nan == :ignore
-                idx = findall(.!any(isnan.(xv), dims=1))  # ignore columns containing nan values
-                rolling_apply_hard(trans, xv[idx], s, d; mode=mode)
+                idx = findall(.!any(isnan.(xv), dims=1)[:])  # ignore columns containing nan values
+                if length(idx) > 0
+                    rolling_apply_hard(trans, view(xv,:,idx), s, d; mode=mode)
+                else
+                    []
+                end
             else
-                xs = rolling_apply_hard(trans, xv, s, d; mode=mode)
+                rolling_apply_hard(trans, xv, s, d; mode=mode)
             end
+
             if length(xs) > 0
+                # println(typeof(squeezedims(xs)))
+                # println(size(squeezedims(xs)))
                 pushfirst!(res, (t,estim(squeezedims(xs))))  # <- Bug: this may give 0-dim array when apply on 1d row vector
             end
         end
@@ -196,11 +203,16 @@ function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, (w,s,d)::Tuple{
         for t = 1:p:L
             xv = view(X, :, t:min(L, t+w-1))
             xs = if nan == :ignore
-                idx = findall(.!any(isnan.(xv), dims=1))  # ignore columns containing nan values
-                rolling_apply_hard(trans, xv[idx], s, d; mode=mode)
+                idx = findall(.!any(isnan.(xv), dims=1)[:])  # ignore columns containing nan values
+                if length(idx) > 0
+                    rolling_apply_hard(trans, view(xv,:,idx), s, d; mode=mode)
+                else
+                    []
+                end
             else
-                xs = rolling_apply_hard(trans, X[:,t:min(L, t+w-1)], s, d; mode=mode)
+                rolling_apply_hard(trans, X[:,t:min(L, t+w-1)], s, d; mode=mode)
             end
+            
             if length(xs) > 0
                 push!(res, (t,estim(squeezedims(xs))))
             end

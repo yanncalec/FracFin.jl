@@ -215,7 +215,11 @@ Compute the covariance matrix of a fWn at some time lag.
 """
 function fWn_covmat_lag(F::AbstractVector{<:AbstractVector{T}}, l::Int, H::Real) where {T<:Real}
     L = maximum([length(f) for f in F])  # maximum length of filters
-    M = [abs(l+(n-m))^(2H) for n=0:L-1, m=0:L-1]    
+    # M = [abs(l+(n-m))^(2H) for n=0:L-1, m=0:L-1]  # matrix comprehension is ~ 10x slower
+    M = zeros(L,L)
+    for n=1:L, m=1:L
+        M[n,m] = abs(l+(n-m))^(2H)
+    end
     Σ = -1/2 * [ψi' * view(M, 1:length(ψi), 1:length(ψj)) * ψj for ψi in F, ψj in F]
 end
 

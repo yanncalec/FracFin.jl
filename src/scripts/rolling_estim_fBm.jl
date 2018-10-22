@@ -34,7 +34,7 @@ function split_timearray_by_day(data::TimeSeries.TimeArray)
     res = []
     for day in day_start:Dates.Day(1):day_end
         t0 = Dates.DateTime(day)
-        t1 = t0+Dates.Day(1)
+        t1 = t0+Dates.Day(1) # -Dates.Minute(1)
         D0 = data[t0:Dates.Minute(1):t1]
         if length(D0)>0
             push!(res, D0)  # Minute or Hours, but Day won't work
@@ -97,14 +97,14 @@ function ParseNTuple(T::Type{P}, S::AbstractString) where {P<:Real}
 end
 
 
-function prepare_data_for_estimator_fGn_MLE(X0::AbstractVector{T}, dlag::Int) where {T<:Real}
+function prepare_data_for_estimator_fGn(X0::AbstractVector{T}, dlag::Int) where {T<:Real}
     dX = fill(NaN, size(X0))  # fGn estimator is not friendly with NaN
     dX[1+dlag:end] = X0[1+dlag:end]-X0[1:end-dlag]
     return dX
 end
 
 
-function prepare_data_for_estimator_fWn_bspline_MLE(X0::AbstractVector{T}, sclrng::AbstractVector{Int}, vm::Int) where {T<:Real}
+function prepare_data_for_estimator_bspline(X0::AbstractVector{T}, sclrng::AbstractVector{Int}, vm::Int) where {T<:Real}
     W0, Mask = FracFin.cwt_bspline(X0, sclrng, vm, :left)
     t0 = findall(all(Mask, dims=2)[:])[1]
     # t1 = findall(all(Mask, dims=2)[:])[end]
@@ -135,7 +135,7 @@ function parse_commandline()
         "--pov" 
         help = "period of innovation"
         arg_type = Int
-        default = 10        
+        default = 5
         "--tfmt"
         help = "time format for parsing csv file"
         arg_type = String
@@ -159,6 +159,9 @@ function parse_commandline()
         "fWn-bspline-MLE"
         action = :command
         help = "fWn-bspline-MLE"
+        "bspline-scalogram"
+        action = :command
+        help = "bspline-scalogram"
     end
 
     @add_arg_table settings["fGn-MLE"] begin    # add command arg_table: same as usual, but invoked on s["cmd"]
@@ -186,6 +189,20 @@ function parse_commandline()
     settings["fWn-bspline-MLE"].description = "fWn description"  # this is how settings are tweaked for commands
     settings["fWn-bspline-MLE"].commands_are_required = true # this makes the sub-commands optional
 
+    @add_arg_table settings["bspline-scalogram"] begin    # add command arg_table: same as usual, but invoked on s["cmd"]
+        "--vm" 
+        help = "vanishing moments of the wavelet"
+        arg_type = Int
+        default = 2
+        "--sclrng"
+        help = "range of integer scales"
+        arg_type = AbstractVector{Int}
+        default = 4:2:50
+    end
+
+    settings["bspline-scalogram"].description = "fWn description"  # this is how settings are tweaked for commands
+    settings["bspline-scalogram"].commands_are_required = true # this makes the sub-commands optional
+
     return parse_args(settings)
 end
 
@@ -206,7 +223,7 @@ function main()
     sname = infile[i1+1:i2-1]  # filename without extension
     
     cmd = parsed_args["%COMMAND%"]  # name of command
-    intraday = parsed_args["intraday"]  # intraday estimation
+    intraday = parsed_args["intraday"]  # intraday estimation    
     wsize = parsed_args["wsize"]  # size of rolling window
     ssize = parsed_args["ssize"]  # size of sub window
     dlen = parsed_args["dlen"]  # length of decorrelation
@@ -216,32 +233,34 @@ function main()
     verbose = parsed_args["verbose"]  # print messages
 
     # recover command options
-    outstr0 = format("wsize[{}]_ssize[{}]_dlen[{}]_pov[{}]", wsize, ssize, dlen, pov)
     prepare_data_for_estimator::Function = X->()  # function for data preparation    
     outstr::String = ""
     estim::Function = X->()
+    trans::Function = X->vec(X)
     
     if cmd  == "fGn-MLE"
         dlag = parsed_args[cmd]["dlag"]  # time-lag of finite difference
-        outstr = outstr0 * format("dlag[{}]", wsize, ssize, dlen, pov, dlag)
-        prepare_data_for_estimator = X -> prepare_data_for_estimator_fGn_MLE(X, dlag)
+        outstr = format("wsize[{}]_ssize[{}]_dlen[{}]_pov[{}]_dlag[{}]", wsize, ssize, dlen, pov, dlag)        
+        prepare_data_for_estimator = X -> prepare_data_for_estimator_fGn(X, dlag)
         estim = X -> FracFin.fGn_MLE_estim(X, dlag; method=:optim, ε=1e-2)
     elseif cmd == "fWn-bspline-MLE"
         sclrng = parsed_args[cmd]["sclrng"]  # range of scales
         vm = parsed_args[cmd]["vm"]  # vanishing moments
-        outstr = outstr0 * format("vm[{}]_sclrng[{}]", vm, sclrng)
-        prepare_data_for_estimator = X -> prepare_data_for_estimator_fWn_bspline_MLE(X, sclrng, vm)
+        outstr = format("wsize[{}]_ssize[{}]_dlen[{}]_pov[{}]_vm[{}]_sclrng[{}]", wsize, ssize, dlen, pov, vm, sclrng)        
+        prepare_data_for_estimator = X -> prepare_data_for_estimator_bspline(X, sclrng, vm)
         estim = X -> FracFin.fWn_bspline_MLE_estim(X, sclrng, vm; method=:optim, ε=1e-2)
+    elseif cmd == "bspline-scalogram"
+        ssize = wsize
+        dlen = 1
+        sclrng = parsed_args[cmd]["sclrng"]  # range of scales
+        vm = parsed_args[cmd]["vm"]  # vanishing moments
+        outstr = format("wsize[{}]_ssize[{}]_dlen[{}]_pov[{}]_vm[{}]_sclrng[{}]", wsize, ssize, dlen, pov, vm, sclrng)        
+        prepare_data_for_estimator = X -> prepare_data_for_estimator_bspline(X, sclrng, vm)
+        estim = X -> FracFin.bspline_scalogram_estim(X, sclrng, vm; mode=:left)
+        # trans = X -> var(X, dims=2)
+        trans = X -> vec(FracFin.robustvar(X, dims=2))
     else
         error("Unknown command")
-    end
-    
-    # make the output folder    
-    outdir = format("{}/{}/{}/{}/{}/", outdir0, sname, ncol, cmd, outstr)
-    try
-        mkpath(outdir)
-        mkpath(outdir * "/csv/")
-    catch
     end
     
     # load data
@@ -250,9 +269,18 @@ function main()
     end
     # toto = CSV.read(infile)
     toto = TimeSeries.readtimearray(infile, format=tfmt, delim=',')
+    cname = toto.colnames[ncol]  # name of the column
     data0 = TimeSeries.TimeArray(toto.timestamp, toto.values[:,ncol])
     data = data0[findall(.~isnan.(data0.values))] # remove nan values
 
+    # make the output folder    
+    outdir = format("{}/{}/{}/{}/{}/", outdir0, sname, cname, cmd, outstr)
+    try
+        mkpath(outdir)
+        mkpath(outdir * "/csv/")
+    catch
+    end
+    
     # process consolidated dataset
     if verbose
         printfmtln("Processing the consolidated dataset...")
@@ -262,15 +290,13 @@ function main()
     
     t0 = Dates.DateTime(day_start)
     t1 = Dates.DateTime(day_end)
-    D0 = data[t0:Dates.Minute(1):t1]  # Minute or Hours, but Day won't work
-    
-    # log price
-    T0, X0 = D0.timestamp, log.(D0.values)
+    D0 = data[t0:Dates.Minute(1):t1]  # Minute or Hours, but Day won't work  <- Bug here
+    T0, X0 = D0.timestamp, log.(D0.values)  # log price
     
     Xdata = prepare_data_for_estimator(X0)
     
     # estimation of hurst and σ
-    res= FracFin.rolling_estim(estim, Xdata, (wsize, ssize, dlen), pov, mode=:causal)
+    res= FracFin.rolling_estim(estim, Xdata, (wsize, ssize, dlen), pov, trans; mode=:causal)
     Ht = [x[2][1][1] for x in res]
     σt = [x[2][1][2] for x in res]
     tidx = [x[1] for x in res]
@@ -336,7 +362,7 @@ function main()
     #             Xdata = prepare_data_for_estimator(X0)
 
     #             # estimation of hurst and σ
-    #             res = FracFin.rolling_estim(estim, Xdata, (wsize, ssize, dlen), pov, mode=:causal)
+    #             res = FracFin.rolling_estim(estim, Xdata, (wsize, ssize, dlen), pov, trans; mode=:causal)
     #             Ht = [x[2][1][1] for x in res]
     #             σt = [x[2][1][2] for x in res]
     #             tidx = [x[1] for x in res]                        
