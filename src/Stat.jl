@@ -194,9 +194,10 @@ function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, (w,s,d)::Tuple{
             end
 
             if length(xs) > 0
+                # println(size(xs))
                 # println(typeof(squeezedims(xs)))
                 # println(size(squeezedims(xs)))
-                pushfirst!(res, (t,estim(squeezedims(xs))))  # <- Bug: this may give 0-dim array when apply on 1d row vector
+                pushfirst!(res, (t,estim(squeezedims(xs, dims=1))))  # <- Bug: this may give 0-dim array when apply on 1d row vector
             end
         end
     else  # anticausal
@@ -214,7 +215,7 @@ function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, (w,s,d)::Tuple{
             end
             
             if length(xs) > 0
-                push!(res, (t,estim(squeezedims(xs))))
+                push!(res, (t,estim(squeezedims(xs, dims=1))))
             end
         end
     end

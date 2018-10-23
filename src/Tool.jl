@@ -101,10 +101,15 @@ diff_sigmoid(α::Real) = exp(α)/(1+2*exp(α)+exp(2α))
 """
 Remove singular dimensions
 """
-function squeezedims(A::AbstractArray{T}) where {T<:Real}
-    dims = tuple(findall(size(A).==1)...)
-    return length(dims)>0 ? dropdims(A, dims=dims) : A
+function squeezedims(A::AbstractArray{T}; dims::Union{Int,AbstractVector{Int}}) where {T<:Real}
+    dima = intersect(tuple(findall(size(A).==1)...), dims)
+    return length(dima)>0 ? dropdims(A, dims=dima) : A
 end
+
+# function squeezedims(A::AbstractArray{T}) where {T<:Real}
+#     dims = tuple(findall(size(A).==1)...)
+#     return length(dims)>0 ? dropdims(A, dims=dims) : A
+# end
 
 
 ifloor(x::Int, y::Int) = floor(Int, x/y) * y

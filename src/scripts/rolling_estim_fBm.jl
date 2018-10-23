@@ -285,13 +285,15 @@ function main()
     if verbose
         printfmtln("Processing the consolidated dataset...")
     end
-    day_start = TimeSeries.Date(data.timestamp[1])
-    day_end = TimeSeries.Date(data.timestamp[end]) + Dates.Day(1)
-    
-    t0 = Dates.DateTime(day_start)
-    t1 = Dates.DateTime(day_end)
-    D0 = data[t0:Dates.Minute(1):t1]  # Minute or Hours, but Day won't work  <- Bug here
-    T0, X0 = D0.timestamp, log.(D0.values)  # log price
+
+    T0, X0 = data.timestamp, log.(data.values)
+
+    # day_start = TimeSeries.Date(data.timestamp[1])
+    # day_end = TimeSeries.Date(data.timestamp[end]) + Dates.Day(1)    
+    # t0 = Dates.DateTime(day_start)
+    # t1 = Dates.DateTime(day_end)
+    # D0 = data[t0:Dates.Minute(1):t1]  # Minute or Hours, but Day won't work  <- Bug here
+    # T0, X0 = D0.timestamp, log.(D0.values)  # log price
     
     Xdata = prepare_data_for_estimator(X0)
     
@@ -316,6 +318,14 @@ function main()
     # plot(fig1, fig2, fig3, fig4, layout=(4,1), size=(1200,1000), legend=true)                
     # outfile = format("{}/estime.pdf",outdir)
     # savefig(outfile)
+
+    fig1 = plot(A0["Log-price"], ylabel="Log-price", label="")
+    fig2 = plot(A0["Hurst"], shape=:circle, ylabel="Hurst", label="")
+    fig3 = plot(A0["σ"], shape=:circle, ylabel="σ", label="")        
+    fig4 = plot(A0["Hurst"], ylim=[0,1], shape=:circle, ylabel="Hurst", label="")
+    plot!(fig4, T0, 0.5*ones(length(T0)), w=3, color=:red, label="")
+    plot(fig1, fig2, fig3, fig4, layout=(4,1), size=(1200,1000), legend=true)                
+    savefig(format("{}/estimate-ts.pdf",outdir))
 
     fig1 = plot(At["Log-price"].values, ylabel="Log-price", label="")
     fig2 = plot(At["Hurst"].values, shape=:circle, ylabel="Hurst", label="")
