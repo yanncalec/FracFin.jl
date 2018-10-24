@@ -9,7 +9,7 @@ module FracFin
 using LinearAlgebra
 using Statistics
 
-import Base: convert, rand, length, size, show, binomial, getindex, promote_rule, squeeze
+import Base: convert, rand, length, size, show, binomial, getindex, promote_rule #, squeeze
 import Distributions: VariateForm, Univariate, Multivariate, ValueSupport, Discrete, Continuous, Sampleable
 import SpecialFunctions: gamma, lgamma
 import DSP: conv, fft, ifft

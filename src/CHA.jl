@@ -319,47 +319,65 @@ Dyadic scale stationary wavelet transform using python library `pywt`.
 # Args
 - x0: input signal
 - wvl: name of wavelet, see `pywt.swt` documentation
-- level: levels of decomposition
+- maxlevel: levels of decomposition
 - mode: mode of zero-padding
 
 # Returns
-- ac: matrix of approximation coefficients with increasing scale index in column direction
-- dc: matrix of detail coefficients
-- mask: mask of zero-padding
+- (ac0, dc0, mask): ac: matrix of approximation coefficients with increasing scale index in column direction; dc: matrix of detail coefficients; mask: mask of zero-padding
+- (ac, dc): arrays of approximation and detail coefficients without boundary elements
 
 # Notes
 - Original signal is zero-padded since `pywt.swt` requires signals of length 2^N
 - The mode of convolution used by `pywt.swt` is not clear.
 """
-function swt(x0::AbstractVector{T}, wvl::String, level::Int, mode::Symbol) where {T<:Real}
+function swt(x0::AbstractVector{T}, wvl::String, maxlevel::Int; mode::Symbol=:left) where {T<:Real}
     # @PyCall.pyimport pywt
-    # wavelet = pywt.Wavelet(wvlname)
-    # dec_lo, dec_hi, rec_lo, rec_hi = wavelet[:inverse_filter_bank]
+    wavelet = pywt[:Wavelet](wvl)
+    dec_lo, dec_hi, rec_lo, rec_hi = wavelet[:inverse_filter_bank]
+    nf = length(dec_lo)  # filter length
     
     # zero padding
     n0 = length(x0)
-    nx = 2^(ceil(Int, log2(n0)))
+    nx = 2^(ceil(Int, log2(n0)))  # length of zero-padded signal
+    nlvl = min(nx, maxlevel)  # number of levels
     x = zeros(T, nx)
-    s::Int = if mode == :left
+    # starting position for zero padding
+    s::Int = if mode == :right
             1
         elseif mode == :center
             max((nx-n0)÷2,1)
-        else
+        elseif mode == :left
             nx-n0+1
-        end    
+        else
+            error("Unknown mode: $mode")
+        end
     x[s:s+n0-1] = x0    
     
-    mask = zeros(Bool, nx); mask[s:s+n0-1] .= true
+    zmask = zeros(Bool, nx); zmask[s:s+n0-1] .= true
     # mask = ones(Bool, nx)
 
-    w0 = pywt[:swt](x, wvl, level=min(nx, level))
+    w0 = pywt[:swt](x, wvl, level=nlvl)
     
     # ac = hcat([c[1][mask] for c in w0]...)
     # dc = hcat([c[2][mask] for c in w0]...)
-    ac = hcat([c[1] for c in w0]...)
-    dc = hcat([c[2] for c in w0]...)
-    
-    return ac, dc, mask
+    ac0 = hcat([c[1] for c in w0]...)
+    dc0 = hcat([c[2] for c in w0]...)
+
+    vmasks = []
+    # ac, dc = [], []
+    for s = 1:nlvl
+        mask = zeros(Bool, nx)
+        nb = nf*2^(nlvl-s)  # number of boundary elements
+        idx = findall(zmask)[nb:end-nb+1]
+        mask[idx] .= true
+        push!(vmasks, mask)
+        # # truncation both sides
+        # push!(ac, ac0[mask0,s][nb:end-nb+1])  
+        # push!(dc, dc0[mask0,s][nb:end-nb+1])
+    end
+
+    # return (ac0, dc0, mask0), (ac, dc, mask), nf
+    return ac0, dc0, vmasks
 end    
 
 
