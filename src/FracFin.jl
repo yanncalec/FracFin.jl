@@ -13,6 +13,7 @@ import Base: convert, rand, length, size, show, binomial, getindex, promote_rule
 import Distributions: VariateForm, Univariate, Multivariate, ValueSupport, Discrete, Continuous, Sampleable
 import SpecialFunctions: gamma, lgamma
 import DSP: conv, fft, ifft
+import Dates
 
 import Wavelets
 # import Wavelets.WT.daubechies
@@ -25,14 +26,15 @@ import Optim
 import ForwardDiff
 
 import StatsBase
-import StatsBase: autocov!, autocov, mean, cov
+import StatsBase: autocov!, autocov
+import Statistics: mean, cov
 
 import LinearAlgebra: norm, pinv
 
 import IterativeSolvers
 import IterativeSolvers: lsqr
 
-# import RCall
+import RCall
 
 import PyCall
 # @PyCall.pyimport pywt
@@ -44,7 +46,7 @@ function __init__()
     copy!(pywt, PyCall.pyimport("pywt"))
 end
 
-# import Calculus
+import TimeSeries
 
 """
     Exception for not implemented methods.

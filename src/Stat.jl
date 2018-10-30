@@ -3,7 +3,7 @@
 """
 Auto-Correlation function by RCall.
 """
-function acf(X::AbstractVector{T}, lagmax::Integer) where {T<:Real}
+function acf(X::AbstractVector{T}, lagmax::Int) where {T<:Real}
     res = RCall.rcopy(RCall.rcall(:acf, X, lagmax, plot=false, na_action=:na_pass))
     return res[:acf][1:end-1]
 end
@@ -11,7 +11,7 @@ end
 """
 Partial Auto-Correlation function by RCall.
 """
-function pacf(X::AbstractVector{T}, lagmax::Integer) where {T<:Real}
+function pacf(X::AbstractVector{T}, lagmax::Int) where {T<:Real}
     res = RCall.rcopy(RCall.rcall(:pacf, X, lagmax, plot=false, na_action=:na_pass))
     return res[:acf][:]
 end
@@ -20,16 +20,16 @@ end
 """
 Auto-Correlation function of increment process.
 """
-function acf_incr(X::AbstractVector{T}, dlags::Union{Int, AbstractVector{Int}}, almax::Int; method::Symbol=:acf) where {T<:Real}
+function acf_incr(X::AbstractVector{T}, dlags::Union{Int, AbstractVector{Int}}, lagmax::Int; method::Symbol=:acf) where {T<:Real}
     # for single value of dlag: convert to a list
     if typeof(dlags) <: Integer
         dlags = [dlags]
     end
     
     A = if method==:acf
-        [acf((X[l+1:end]-X[1:end-l])[100:end-100], almax) for l in dlags]
+        [acf((X[l+1:end]-X[1:end-l])[100:end-100], lagmax) for l in dlags]
     elseif method==:pacf
-        [pacf((X[l+1:end]-X[1:end-l])[100:end-100], almax) for l in dlags]            
+        [pacf((X[l+1:end]-X[1:end-l])[100:end-100], lagmax) for l in dlags]            
     else
         error("Invalid method: $(method)")
     end
@@ -38,10 +38,10 @@ function acf_incr(X::AbstractVector{T}, dlags::Union{Int, AbstractVector{Int}}, 
     # for l in dlags
     #     dX = X[l+1:end]-X[1:end-l]
     #     if method==:acf
-    #         push!(A, acf(dX, almax))
+    #         push!(A, acf(dX, lagmax))
     #         # push!(A, [cor(dX[t+1:end], dX[1:end-t]) for t in tidx])
     #     elseif method==:pacf
-    #         push!(A, pacf(dX, almax))
+    #         push!(A, pacf(dX, lagmax))
     #     else
     #         error("Invalid method: $(method)")
     #     end
@@ -181,23 +181,22 @@ function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, (w,s,d)::Tuple{
 
     if mode == :causal  # causal
         for t = L:-p:1
-            xv = view(X, :, t:-1:max(1, t-w+1))
+            # xv = view(X, :, t:-1:max(1, t-w+1))
+            xv = view(X, :, max(1, t-w+1):t)
             xs = if nan == :ignore
                 idx = findall(.!any(isnan.(xv), dims=1)[:])  # ignore columns containing nan values
                 if length(idx) > 0
-                    rolling_apply_hard(trans, view(xv,:,idx), s, d; mode=mode)
+                    rolling_apply_hard(trans, view(xv,:,idx), s, d; mode=:causal)
                 else
                     []
                 end
             else
-                rolling_apply_hard(trans, xv, s, d; mode=mode)
+                rolling_apply_hard(trans, xv, s, d; mode=:causal)
             end
 
             if length(xs) > 0
                 # println(size(xs))
-                # println(typeof(squeezedims(xs)))
-                # println(size(squeezedims(xs)))
-                pushfirst!(res, (t,estim(squeezedims(xs, dims=1))))  # <- Bug: this may give 0-dim array when apply on 1d row vector
+                pushfirst!(res, (t,estim(squeezedims(xs, dims=[1,2]))))
             end
         end
     else  # anticausal
@@ -206,16 +205,16 @@ function rolling_estim(estim::Function, X0::AbstractVecOrMat{T}, (w,s,d)::Tuple{
             xs = if nan == :ignore
                 idx = findall(.!any(isnan.(xv), dims=1)[:])  # ignore columns containing nan values
                 if length(idx) > 0
-                    rolling_apply_hard(trans, view(xv,:,idx), s, d; mode=mode)
+                    rolling_apply_hard(trans, view(xv,:,idx), s, d; mode=:anticausal)
                 else
                     []
                 end
             else
-                rolling_apply_hard(trans, X[:,t:min(L, t+w-1)], s, d; mode=mode)
+                rolling_apply_hard(trans, xv, s, d; mode=:anticausal)
             end
             
             if length(xs) > 0
-                push!(res, (t,estim(squeezedims(xs, dims=1))))
+                push!(res, (t,estim(squeezedims(xs, dims=[1,2]))))
             end
         end
     end

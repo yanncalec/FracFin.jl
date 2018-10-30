@@ -99,11 +99,20 @@ diff_sigmoid(α::Real) = exp(α)/(1+2*exp(α)+exp(2α))
 
 
 """
-Remove singular dimensions
+Remove singular dimensions of an array.
+
+# Note
+This function is safe for array of size (1,1,..1).
 """
-function squeezedims(A::AbstractArray{T}; dims::Union{Int,AbstractVector{Int}}) where {T<:Real}
-    dima = intersect(tuple(findall(size(A).==1)...), dims)
-    return length(dima)>0 ? dropdims(A, dims=dima) : A
+function squeezedims(X::AbstractArray{T}; dims::Union{Int,AbstractVector{Int}}) where {T<:Real}
+    dimx = tuple(intersect(tuple(findall(size(X).==1)...), dims)...)
+    return if length(dimx) == 0
+        X
+    elseif length(dimx) == ndims(X)
+        vec(X)
+    else
+        dropdims(X, dims=dimx)
+    end
 end
 
 # function squeezedims(A::AbstractArray{T}) where {T<:Real}
@@ -254,3 +263,76 @@ end
 row_normalize(A) = col_normalize(transpose(A))
 row_normalize!(A) = col_normalize!(transpose(A))
 
+
+###### Time series manipulation ######
+
+function ffill!(X::AbstractVector{T}) where T<:Number
+    for n=2:length(X)
+        if ismissing(X[n]) || isnan(X[n])
+            X[n] = X[n-1]
+        end
+    end
+    return X
+end
+
+ffill(X) = ffill!(copy(X))
+
+function bfill!(X::AbstractVector{T}) where T<:Number
+    for n=length(X)-1:-1:1
+        if ismissing(X[n]) || isnan(X[n])
+            X[n] = X[n+1]
+        end
+    end
+    return X
+end
+bfill(X) = bfill!(copy(X))
+
+
+"""
+Split a TimeArray by day with truncation.
+
+# Args
+- t0: beginning of the day, e.g., `Dates.Hour(9) + Dates.Minute(5)` for `09:05`
+- t1: ending of the day, e.g., `Dates.Hour(17) + Dates.Minute(24)` for `17:24`
+
+# Notes
+"""
+function split_by_day_with_truncation(data::TimeSeries.TimeArray, t0::Dates.AbstractTime, t1::Dates.AbstractTime)
+    res = []
+    cname = TimeSeries.colnames(data)
+    d0, d1 = Dates.Date(TimeSeries.timestamp(data[1])[1]), Dates.Date(TimeSeries.timestamp(data[end])[1])
+    
+    for d in d0:Dates.Day(1):d1
+        m0 = Dates.DateTime(d) + t0
+        m1 = Dates.DateTime(d) + t1
+        mtsp = m0:Dates.Minute(1):m1  # full timestamp
+        stsp = intersect(mtsp, TimeSeries.timestamp(data))  # valid timestamp
+        if length(stsp) > 0
+            pidx = map(t->findall(isequal(t), mtsp)[1], stsp)  # index of stsp in mtsp
+            A = fill(NaN, length(mtsp))
+            A[pidx] = TimeSeries.values(data[stsp])
+            S = TimeSeries.TimeArray(mtsp, bfill(ffill(A)), cname)
+            push!(res, S)
+        end
+    end
+#     return data[vec(hcat(tidx...))]
+    return res
+end
+
+
+function split_by_day(data::TimeSeries.TimeArray)
+    res = []
+    d0, d1 = Dates.Date(TimeSeries.timestamp(data[1])[1]), Dates.Date(TimeSeries.timestamp(data[end])[1])
+    
+    for d in d0:Dates.Day(1):d1
+        m0 = Dates.DateTime(d)
+        m1 = Dates.DateTime(d + Dates.Hour(23) + Dates.Minute(59))
+        mtsp = m0:Dates.Minute(1):m1  # full timestamp
+        stsp = intersect(mtsp, TimeSeries.timestamp(data))  # valid timestamp
+        if length(stsp) > 0
+            push!(res, data[mtsp])
+        end
+    end
+
+    return res
+end

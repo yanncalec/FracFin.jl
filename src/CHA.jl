@@ -367,8 +367,10 @@ function swt(x0::AbstractVector{T}, wvl::String, maxlevel::Int; mode::Symbol=:le
     # ac, dc = [], []
     for s = 1:nlvl
         mask = zeros(Bool, nx)
+        # nb = max(1, floor(Int, nf*2^(nlvl-s-1.)))  # number of boundary elements
         nb = nf*2^(nlvl-s)  # number of boundary elements
         idx = findall(zmask)[nb:end-nb+1]
+        # idx = findall(zmask)[nb:end]
         mask[idx] .= true
         push!(vmasks, mask)
         # # truncation both sides
@@ -377,7 +379,7 @@ function swt(x0::AbstractVector{T}, wvl::String, maxlevel::Int; mode::Symbol=:le
     end
 
     # return (ac0, dc0, mask0), (ac, dc, mask), nf
-    return ac0, dc0, vmasks
+    return ac0, dc0, zmask, vmasks
 end    
 
 
@@ -387,20 +389,20 @@ Inverse stationary wavelet transform using python library `pywt`.
 # Args
 - ac, dc: see outputs of `swt`
 - wvl: name of wavelet, see `pywt.swt` documentation
-- mask: mask of zero-padding
+- zmask: mask of zero-padding
 """
-function iswt(ac::AbstractVector{T}, dc::AbstractMatrix{T}, wvl::String, mask::AbstractVector{Bool}) where {T<:Real}
+function iswt(ac::AbstractVector{T}, dc::AbstractMatrix{T}, wvl::String, zmask::AbstractVector{Bool}) where {T<:Real}
     # @PyCall.pyimport pywt
     level = size(dc,2)
     w = [(ac, dc[:,1])]
     for n=2:level
         push!(w, (fill(0, size(ac)), dc[:,n]))
     end
-    # w = [(emb(ac, mask), emb(dc[:,1], mask))]
+    # w = [(emb(ac, mask), emb(dc[:,1], zmask))]
     # for n=2:level
-    #     push!(w, (fill(0, size(ac)), emb(dc[:,n], mask)))
+    #     push!(w, (fill(0, size(ac)), emb(dc[:,n], zmask)))
     # end
-    return pywt[:iswt](w, wvl)[findall(mask)]
+    return pywt[:iswt](w, wvl)[findall(zmask)]
 end
 
 

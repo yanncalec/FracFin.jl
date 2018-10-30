@@ -18,8 +18,8 @@ Power-law estimator for Hurst exponent and volatility.
 # Returns
 - (hurst, σ), ols: estimation of Hurst and volatility, as well as the GLM ols object.
 """
-function powlaw_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, p::T=2.) where {T<:Real}
-    @assert length(lags) > 1 && all(lags .> 1)
+function powlaw_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, p::Real=2.) where {T<:Real}
+    @assert length(lags) > 1 && all(lags .>= 1)
     @assert p > 0.
 
     C = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
@@ -32,6 +32,7 @@ function powlaw_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, p::T=2.) 
     # Ap = hcat(xp, ones(length(xp))) # design matrix
     # hurst, β = Ap \ yp
     # or by GLM
+
     dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
     ols = GLM.lm(@GLM.formula(yvar~xvar), dg)
     β, hurst = GLM.coef(ols)
@@ -51,18 +52,27 @@ B-Spline scalogram estimator for Hurst exponent and volatility.
 - S: vector of scalogram, ie, variance of the wavelet coefficients per scale.
 - sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one row in the matrix X
 - v: vanishing moments
+- p: power by which the scalogram is computed
 """
-function bspline_scalogram_estim(S::AbstractVector{T}, sclrng::AbstractVector{Int}, v::Int; mode::Symbol=:center) where {T<:Real}
+function bspline_scalogram_estim(S::AbstractVector{T}, sclrng::AbstractVector{Int}, v::Int; p::Real=2., mode::Symbol=:center) where {T<:Real}
     @assert length(S) == length(sclrng)
 
-    df = DataFrames.DataFrame(xvar=log.(sclrng.^2), yvar=log.(S))
+    C = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
+
+    # res = IRLS(log.(S), p*log.(sclrng), p)
+    # hurst::Float64 = res[1][1]-1/2
+    # β::Float64 = res[1][2][1]  # returned value is a scalar in a vector form
+    # ols::Float64 = NaN
+    
+    df = DataFrames.DataFrame(xvar=log.(sclrng.^p), yvar=log.(S))
     ols = GLM.lm(@GLM.formula(yvar~xvar), df)
     coef = GLM.coef(ols)
-
+    β::Float64 = coef[1]
     hurst::Float64 = coef[2]-1/2
+    
     σ::Float64 = try
         Aρ = Aρ_bspline(0, 1, hurst, v, mode)
-        exp((coef[1] - log(abs(Aρ)))/2)
+        exp((β - log(C) - log(abs(Aρ))*p/2)/p)
     catch
         NaN
     end
@@ -78,6 +88,7 @@ function bspline_scalogram_estim(S::AbstractVector{T}, sclrng::AbstractVector{In
 end
 
 const fBm_bspline_scalogram_estim = bspline_scalogram_estim
+
 
 # """
 # B-Spline scalogram estimator with a matrix of DCWT coefficients as input. Each column in `W` is a vector of DCWT coefficients.
