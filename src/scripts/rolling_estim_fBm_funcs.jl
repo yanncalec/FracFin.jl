@@ -14,6 +14,25 @@ import TimeSeries
 import Dates
 import FracFin
 
+function load_data_day()
+end
+
+"""
+# t0 = Dates.Hour(9) + Dates.Minute(5)
+# t1 = Dates.Hour(17) + Dates.Minute(24)
+
+data0 = toto[cname]
+"""
+function load_data_csv(infile::String; tfmt::String="yyyy-mm-dd HH:MM:SS", T::Type{Dates.TimePeriod}, wtime::Tuple{AbstractTime,AbstractTime}=(Dates.Hour(0), Dates.Hour(24)))
+    toto = TimeSeries.readtimearray(infile, format=tfmt, delim=',')
+    cname = TimeSeries.colnames(toto)[ncol]  # name of the column
+    
+    sdata0 = trunc_split_timearray(data0, wtime, Dates.Minute(1))  # splitted data of identical length
+    data = vcat(sdata0...)
+    
+    # data = TimeArray(TimeSeries.timestamp(toto), TimeSeries.values(toto)[:,ncol])
+    any(isnan.(TimeSeries.values(data))) && error("NaN values detected in input data!")
+end
 
 function prepare_data_for_estimator_fGn(X0::AbstractVector{T}, dlag::Int) where {T<:Real}
     dX = fill(NaN, size(X0))  # fGn estimator is not friendly with NaN
@@ -31,17 +50,8 @@ function prepare_data_for_estimator_bspline(X0::AbstractVector{T}, sclrng::Abstr
 end
 
 
-function main()
-    parsed_args = parse_commandline()
-    # println("Parsed args:")
-    # for (arg,val) in parsed_args
-    #     println("  $arg  =>  $val")
-    # end
-
-    # recover global parameters and options
-    infile = parsed_args["infile"]
-    outdir0 = parsed_args["outdir"]
-
+function rolling_estim_fBm_intraday(infile::String, outdir0::String, cmd::String, 
+    wsd, verbose::Bool)
     i1 = something(findlast(isequal('/'), infile), 0)
     i2 = something(findlast(isequal('.'), infile), length(infile)+1)
     sname = infile[i1+1:i2-1]  # filename without extension
@@ -113,7 +123,7 @@ function main()
     sdata0 = FracFin.split_by_day_with_truncation(data0, t0, t1)  # splitted data of identical length
     data = vcat(sdata0...)
     
-    # data = TimeSeries.TimeArray(TimeSeries.timestamp(toto), TimeSeries.values(toto)[:,ncol])
+    # data = TimeArray(TimeSeries.timestamp(toto), TimeSeries.values(toto)[:,ncol])
     any(isnan.(TimeSeries.values(data))) && error("NaN values detected in input data!")
     
     # make the output folder    
@@ -149,8 +159,8 @@ function main()
     Ht0 = fill(NaN, length(T0)); Ht0[tidx] = Ht
     σt0 = fill(NaN, length(T0)); σt0[tidx] = σt
     
-    A0 = TimeSeries.TimeArray(T0, [X0 Ht0 σt0], ["Log_Price", "Hurst", "σ"])
-    At = TimeSeries.TimeArray(T0[tidx], [X0[tidx] Ht σt], ["Log_Price", "Hurst", "σ"])
+    A0 = TimeArray(T0, [X0 Ht0 σt0], ["Log_Price", "Hurst", "σ"])
+    At = TimeArray(T0[tidx], [X0[tidx] Ht σt], ["Log_Price", "Hurst", "σ"])
 
     #     title_str = format("{}, wsize={}", sname, wsize)
     # fig1 = plot(A0["Log-price"], title=title_str, ylabel="Log-price", label="")
@@ -238,7 +248,7 @@ function main()
     #             outfile = format("{}/{}.pdf",outdir, day)
     #             savefig(outfile)
 
-    #             At = TimeSeries.TimeArray(T0[tidx], [Ht σt], ["Hurst", "σ"])
+    #             At = TimeArray(T0[tidx], [Ht σt], ["Hurst", "σ"])
     #             outfile = format("{}/csv/{}.csv",outdir, day)
     #             TimeSeries.writetimearray(At, outfile)
     #         end

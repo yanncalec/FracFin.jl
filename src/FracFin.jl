@@ -34,6 +34,11 @@ import LinearAlgebra: norm, pinv
 import IterativeSolvers
 import IterativeSolvers: lsqr
 
+import Dates
+import Dates:AbstractTime, AbstractDateTime, TimePeriod
+
+import TimeSeries
+import TimeSeries: TimeArray
 import RCall
 
 import PyCall

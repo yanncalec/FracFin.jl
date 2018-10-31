@@ -28,7 +28,7 @@ import Dates
 
 import FracFin
 
-function split_timearray_by_day(data::TimeSeries.TimeArray)
+function split_timearray_by_day(data::TimeArray)
     day_start = TimeSeries.Date(TimeSeries.timestamp(data)[1])
     day_end = TimeSeries.Date(TimeSeries.timestamp(data)[end]) #-Dates.Day(1)
     res = []
@@ -312,7 +312,7 @@ function main()
     sdata0 = FracFin.split_by_day_with_truncation(data0, t0, t1)  # splitted data of identical length
     data = vcat(sdata0...)
     
-    # data = TimeSeries.TimeArray(TimeSeries.timestamp(toto), TimeSeries.values(toto)[:,ncol])
+    # data = TimeArray(TimeSeries.timestamp(toto), TimeSeries.values(toto)[:,ncol])
     any(isnan.(TimeSeries.values(data))) && error("NaN values detected in input data!")
     
     # make the output folder    
@@ -348,8 +348,8 @@ function main()
     Ht0 = fill(NaN, length(T0)); Ht0[tidx] = Ht
     σt0 = fill(NaN, length(T0)); σt0[tidx] = σt
     
-    A0 = TimeSeries.TimeArray(T0, [X0 Ht0 σt0], ["Log_Price", "Hurst", "σ"])
-    At = TimeSeries.TimeArray(T0[tidx], [X0[tidx] Ht σt], ["Log_Price", "Hurst", "σ"])
+    A0 = TimeArray(T0, [X0 Ht0 σt0], ["Log_Price", "Hurst", "σ"])
+    At = TimeArray(T0[tidx], [X0[tidx] Ht σt], ["Log_Price", "Hurst", "σ"])
 
     #     title_str = format("{}, wsize={}", sname, wsize)
     # fig1 = plot(A0["Log-price"], title=title_str, ylabel="Log-price", label="")
@@ -437,7 +437,7 @@ function main()
     #             outfile = format("{}/{}.pdf",outdir, day)
     #             savefig(outfile)
 
-    #             At = TimeSeries.TimeArray(T0[tidx], [Ht σt], ["Hurst", "σ"])
+    #             At = TimeArray(T0[tidx], [Ht σt], ["Hurst", "σ"])
     #             outfile = format("{}/csv/{}.csv",outdir, day)
     #             TimeSeries.writetimearray(At, outfile)
     #         end

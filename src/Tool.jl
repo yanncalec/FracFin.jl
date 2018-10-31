@@ -289,7 +289,7 @@ bfill(X) = bfill!(copy(X))
 
 
 """
-Split a TimeArray by day with truncation.
+Split a TimeArray with truncation.
 
 # Args
 - t0: beginning of the day, e.g., `Dates.Hour(9) + Dates.Minute(5)` for `09:05`
@@ -297,30 +297,71 @@ Split a TimeArray by day with truncation.
 
 # Notes
 """
-function split_by_day_with_truncation(data::TimeSeries.TimeArray, t0::Dates.AbstractTime, t1::Dates.AbstractTime)
-    cname = TimeSeries.colnames(data)
-    d0, d1 = Dates.Date(TimeSeries.timestamp(data)[1]), Dates.Date(TimeSeries.timestamp(data)[end])
+function window_split_timearray(data::TimeArray, T::AbstractTime, (wa,wb)::NTuple{2, Union{Nothing, AbstractTime}}=(nothing, nothing); fillmode::Symbol=:nfill)
+    stamp = TimeSeries.timestamp(data)  # time stamp
+    time_begin, toto = Dates.floorceil(stamp[1], T)
+    toto, time_end = Dates.floorceil(stamp[end], T)
+    unit = minimum(diff(stamp)) # ÷ Dates.Millisecond(1000)
+    # unit = Dates.Second(dt)  # time unit of data
+
     res = []
-    
-    for d in d0:Dates.Day(1):d1
-        m0 = Dates.DateTime(d) + t0
-        m1 = Dates.DateTime(d) + t1
-        mtsp = m0:Dates.Minute(1):m1  # full timestamp
-        stsp = intersect(mtsp, TimeSeries.timestamp(data))  # valid timestamp
-        if length(stsp) > 0
-            pidx = map(t->findall(isequal(t), mtsp)[1], stsp)  # index of stsp in mtsp
-            A = fill(NaN, length(mtsp))
-            A[pidx] = TimeSeries.values(data[stsp])
-            S = TimeSeries.TimeArray(mtsp, bfill(ffill(A)), cname)
-            push!(res, S)
+    for t in time_begin:T:time_end
+        ta, tb = 
+        if wa == nothing && wb == nothing
+            t, t+T
+        elseif wa == nothing
+            t, t+wb
+        elseif wb == nothing
+            t+wa, t+T
+        else            
+            t+wa, t+wb
+        end
+
+        y = TimeSeries.to(TimeSeries.from(data,ta),tb)
+        if length(y) > 0
+            x0 = (wa == nothing && wb == nothing) ? y : window_timearray(y, ta:unit:tb, fillmode)
+            x = (TimeSeries.timestamp(x0)[end] == tb) ? x0[1:end-1] : x0
+            if length(x) > 0
+                push!(res, x)
+            end
         end
     end
-#     return data[vec(hcat(tidx...))]
     return res
 end
 
 
-function split_by_day(data::TimeSeries.TimeArray)
+function window_timearray(A::TimeArray, tstp::AbstractVector{<:Dates.AbstractTime}, fillmode::Symbol)
+# function window_timearray(A::TimeArray, tstp::AbstractVector{<:Dates.AbstractTime}, fill::Symbol=:fbfill)
+    # @assert N <= 2
+    cnames = TimeSeries.colnames(A)
+    vstp = intersect(tstp, TimeSeries.timestamp(A))  # valid timestamps
+
+    sidx = map(t->findall(isequal(t), tstp)[1], vstp)  # relative index of valid timestamp
+    # shape = (ndims(TimeSeries.values(A)) == 1) ? (length(tstp),) : (length(tstp),length(cnames)) 
+    
+    x = fill(NaN, (length(tstp),length(cnames)))
+    x[sidx,:] = TimeSeries.values(A[vstp])
+    
+    xf = if fillmode == :nfill
+        x
+    elseif fillmode==:ffill
+        xf = hcat([ffill(x[:,n]) for n=1:size(x,2)]...)
+    elseif fillmode==:bfill    
+        xf = hcat([bfill(x[:,n]) for n=1:size(x,2)]...)
+    elseif fillmode==:fbfill
+        xf = hcat([bfill(ffill(x[:,n])) for n=1:size(x,2)]...)
+    elseif fillmode==:bffill
+        xf = hcat([ffill(bfill(x[:,n])) for n=1:size(x,2)]...)
+    else
+        error("Unknown symbol: $(fill)")
+    end
+
+    return TimeArray(tstp, (ndims(TimeSeries.values(A))==1) ? vec(xf) : xf, cnames)
+end
+
+
+
+function split_by_day(data::TimeArray)
     res = []
     d0, d1 = Dates.Date(TimeSeries.timestamp(data[1])[1]), Dates.Date(TimeSeries.timestamp(data[end])[1])
     
