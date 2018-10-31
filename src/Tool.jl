@@ -298,9 +298,9 @@ Split a TimeArray by day with truncation.
 # Notes
 """
 function split_by_day_with_truncation(data::TimeSeries.TimeArray, t0::Dates.AbstractTime, t1::Dates.AbstractTime)
-    res = []
     cname = TimeSeries.colnames(data)
-    d0, d1 = Dates.Date(TimeSeries.timestamp(data[1])[1]), Dates.Date(TimeSeries.timestamp(data[end])[1])
+    d0, d1 = Dates.Date(TimeSeries.timestamp(data)[1]), Dates.Date(TimeSeries.timestamp(data)[end])
+    res = []
     
     for d in d0:Dates.Day(1):d1
         m0 = Dates.DateTime(d) + t0
