@@ -323,7 +323,7 @@ function main()
             Tt = [Dates.DateTime(t) for t in Tm[1,:]]
         else
             sdata0 = FracFin.window_split_timearray(data0, Dates.Hour(24), daytime, fillmode=:fb, endpoint=false)
-            Xm = reshape(vcat(TimeSeries.values.(sdata0)...), 1, :)
+            Xm = log.(reshape(vcat(TimeSeries.values.(sdata0)...), 1, :))
             Tt = vcat(TimeSeries.timestamp.(sdata0)...)
             Xt = Xm[1, :]
         end
