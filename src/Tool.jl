@@ -297,7 +297,7 @@ Split a TimeArray with truncation.
 
 # Notes
 """
-function window_split_timearray(data::TimeArray, T::AbstractTime, (wa,wb)::NTuple{2, Union{Nothing, AbstractTime}}=(nothing, nothing); fillmode::Symbol=:nfill)
+function window_split_timearray(data::TimeArray, T::AbstractTime, (wa,wb)::NTuple{2, Union{Nothing, AbstractTime}}=(nothing, nothing); fillmode::Symbol=:fb, endpoint::Bool=true)
     stamp = TimeSeries.timestamp(data)  # time stamp
     time_begin, toto = Dates.floorceil(stamp[1], T)
     toto, time_end = Dates.floorceil(stamp[end], T)
@@ -306,21 +306,14 @@ function window_split_timearray(data::TimeArray, T::AbstractTime, (wa,wb)::NTupl
 
     res = []
     for t in time_begin:T:time_end
-        ta, tb = 
-        if wa == nothing && wb == nothing
-            t, t+T
-        elseif wa == nothing
-            t, t+wb
-        elseif wb == nothing
-            t+wa, t+T
-        else            
-            t+wa, t+wb
-        end
+        ta = (wa == nothing) ? t : t+wa
+        tb = (wb == nothing) ? t+T : t+wb
 
         y = TimeSeries.to(TimeSeries.from(data,ta),tb)
         if length(y) > 0
-            x0 = (wa == nothing && wb == nothing) ? y : window_timearray(y, ta:unit:tb, fillmode)
-            x = (TimeSeries.timestamp(x0)[end] == tb) ? x0[1:end-1] : x0
+            # x0 = (wa == nothing && wb == nothing) ? y : window_timearray(y, ta:unit:tb, fillmode)
+            x0 = _window_timearray(y, ta:unit:tb, fillmode)
+            x = (TimeSeries.timestamp(x0)[end] == tb && !endpoint) ? x0[1:end-1] : x0
             if length(x) > 0
                 push!(res, x)
             end
@@ -330,33 +323,34 @@ function window_split_timearray(data::TimeArray, T::AbstractTime, (wa,wb)::NTupl
 end
 
 
-function window_timearray(A::TimeArray, tstp::AbstractVector{<:Dates.AbstractTime}, fillmode::Symbol)
-# function window_timearray(A::TimeArray, tstp::AbstractVector{<:Dates.AbstractTime}, fill::Symbol=:fbfill)
-    # @assert N <= 2
-    cnames = TimeSeries.colnames(A)
-    vstp = intersect(tstp, TimeSeries.timestamp(A))  # valid timestamps
-
-    sidx = map(t->findall(isequal(t), tstp)[1], vstp)  # relative index of valid timestamp
-    # shape = (ndims(TimeSeries.values(A)) == 1) ? (length(tstp),) : (length(tstp),length(cnames)) 
-    
-    x = fill(NaN, (length(tstp),length(cnames)))
-    x[sidx,:] = TimeSeries.values(A[vstp])
-    
-    xf = if fillmode == :nfill
-        x
-    elseif fillmode==:ffill
-        xf = hcat([ffill(x[:,n]) for n=1:size(x,2)]...)
-    elseif fillmode==:bfill    
-        xf = hcat([bfill(x[:,n]) for n=1:size(x,2)]...)
-    elseif fillmode==:fbfill
-        xf = hcat([bfill(ffill(x[:,n])) for n=1:size(x,2)]...)
-    elseif fillmode==:bffill
-        xf = hcat([ffill(bfill(x[:,n])) for n=1:size(x,2)]...)
+function _window_timearray(A::TimeArray, tstp::AbstractVector{<:Dates.AbstractTime}, fillmode::Symbol)
+    if fillmode == :o
+        return A
     else
-        error("Unknown symbol: $(fill)")
+        cnames = TimeSeries.colnames(A)
+        vstp = intersect(tstp, TimeSeries.timestamp(A))  # valid timestamps
+        sidx = map(t->findall(isequal(t), tstp)[1], vstp)  # relative index of valid timestamp
+        # shape = (ndims(TimeSeries.values(A)) == 1) ? (length(tstp),) : (length(tstp),length(cnames)) 
+        
+        x = fill(NaN, (length(tstp),length(cnames)))
+        x[sidx,:] = TimeSeries.values(A[vstp])
+        
+        xf = if fillmode == :n
+            x
+        elseif fillmode==:f
+            xf = hcat([ffill(x[:,n]) for n=1:size(x,2)]...)
+        elseif fillmode==:b
+            xf = hcat([bfill(x[:,n]) for n=1:size(x,2)]...)
+        elseif fillmode==:fb
+            xf = hcat([bfill(ffill(x[:,n])) for n=1:size(x,2)]...)
+        elseif fillmode==:bf
+            xf = hcat([ffill(bfill(x[:,n])) for n=1:size(x,2)]...)
+        else
+            error("Unknown symbol: $(fill)")
+        end
+        
+        return TimeArray(tstp, (ndims(TimeSeries.values(A))==1) ? vec(xf) : xf, cnames)
     end
-
-    return TimeArray(tstp, (ndims(TimeSeries.values(A))==1) ? vec(xf) : xf, cnames)
 end
 
 

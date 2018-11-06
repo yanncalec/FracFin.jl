@@ -4,17 +4,44 @@ using ArgParse
 import ArgParse: parse_item
 
 using Formatting
-using Statistics
 
 using Plots
 # pyplot(reuse=true, size=(900,300))
 pyplot()
 theme(:ggplot2)
 
+# # using LinearAlgebra
+# # using PyCall
+
+# # import DataFrames
+# # import DSP
+# # import GLM
+# # import Optim
+# # import ForwardDiff
+# # import CSV
 import TimeSeries
 import Dates
+# import StatsBase
+
+# # import PyPlot; const plt = PyPlot
+# # plt.plt[:style][:use]("ggplot")
+
 import FracFin
 
+function split_timearray_by_day(data::TimeArray)
+    day_start = TimeSeries.Date(TimeSeries.timestamp(data)[1])
+    day_end = TimeSeries.Date(TimeSeries.timestamp(data)[end]) #-Dates.Day(1)
+    res = []
+    for day in day_start:Dates.Day(1):day_end
+        t0 = Dates.DateTime(day)
+        t1 = t0+Dates.Day(1) # -Dates.Minute(1)
+        D0 = data[t0:Dates.Minute(1):t1]
+        if length(D0)>0
+            push!(res, D0)  # Minute or Hours, but Day won't work
+        end
+    end
+    return res
+end
 
 function ArgParse.parse_item(::Type{AbstractVector{Int}}, S::AbstractString)
     # return ParseAbstractVector{Int}(S) #
@@ -71,14 +98,14 @@ function ParseNTuple(T::Type{P}, S::AbstractString) where {P<:Real}
 end
 
 
-function prepare_fGn(X0::AbstractVector{T}, dlag::Int) where {T<:Real}
+function prepare_data_for_estimator_fGn(X0::AbstractVector{T}, dlag::Int) where {T<:Real}
     dX = fill(NaN, size(X0))  # fGn estimator is not friendly with NaN
     dX[1+dlag:end] = X0[1+dlag:end]-X0[1:end-dlag]
     return dX
 end
 
 
-function prepare_bspline(X0::AbstractVector{T}, sclrng::AbstractVector{Int}, vm::Int) where {T<:Real}
+function prepare_data_for_estimator_bspline(X0::AbstractVector{T}, sclrng::AbstractVector{Int}, vm::Int) where {T<:Real}
     W0, Mask = FracFin.cwt_bspline(X0, sclrng, vm, :left)
     t0 = findall(all(Mask, dims=2)[:])[1]
     # t1 = findall(all(Mask, dims=2)[:])[end]
@@ -88,9 +115,12 @@ end
 
 
 function parse_commandline()
-    settings = ArgParseSettings("Apply rolling window estimator of fBm.")
+    settings = ArgParseSettings("Apply the fWn-bspline maximum likelihood estimator.")
 
     @add_arg_table settings begin
+        "--intraday"
+        help = "apply estimation on a daily basis"
+        action = :store_true
         "--wsize"
         help = "size of rolling window"
         arg_type = Int
@@ -107,18 +137,10 @@ function parse_commandline()
         help = "period of innovation"
         arg_type = Int
         default = 5
-        "--ipts"
-        help = "number of points per day (for intraday data only), 0 for no down-sampling"
+        "--dwin"
+        help = "number of intraday window"
         arg_type = Int
         default = 0
-        "--idta"
-        help = " starting time of truncation (for intraday data only)"
-        arg_type = String
-        default = "09:05"
-        "--idtb"
-        help = " ending time of truncation (for intraday data only)"
-        arg_type = String
-        default = "17:25"
         "--tfmt"
         help = "time format for parsing csv file"
         arg_type = String
@@ -228,41 +250,40 @@ function main()
     sname = infile[i1+1:i2-1]  # filename without extension
 
     cmd = parsed_args["%COMMAND%"]  # name of command
+    intraday = parsed_args["intraday"]  # intraday estimation
     wsize = parsed_args["wsize"]  # size of rolling window
     ssize = parsed_args["ssize"]  # size of sub window
     dlen = parsed_args["dlen"]  # length of decorrelation
     pov = parsed_args["pov"]  # period of innovation
-    ipts = parsed_args["ipts"]  # number of pts per day
-    idta = parsed_args["idta"]
-    idtb = parsed_args["idtb"]
+    dwin = parsed_args["dwin"]  # number of intraday window
     tfmt = parsed_args["tfmt"]  # time format
     ncol = parsed_args["ncol"]  # index of column
     verbose = parsed_args["verbose"]  # print messages
 
     # recover command options
-    prepare::Function = X->()  # function for data preparation
+    prepare_data_for_estimator::Function = X->()  # function for data preparation
+    outstr::String = ""
     estim::Function = X->()
     trans::Function = X->vec(X)
-    outstr::String = ""
 
     if cmd  == "powlaw"
         ssize = wsize
         dlen = 1
         pow = parsed_args[cmd]["pow"]  # time-lags of finite difference
         dlags = parsed_args[cmd]["dlags"]  # time-lags of finite difference
-        outstr = format("wsize[{}]_ipts[{}]_pov[{}]_pow[{}]_dlags[{}]", wsize, ipts, pov, pow, dlags)
-        prepare = X -> X
+        outstr = format("wsize[{}]_pov[{}]_pow[{}]_dlags[{}]", wsize, pov, pow, dlags)
+        prepare_data_for_estimator = X -> X
         estim = X -> FracFin.powlaw_estim(X, dlags, pow)
     elseif cmd  == "fGn-MLE"
         dlag = parsed_args[cmd]["dlag"]  # time-lag of finite difference
-        outstr = format("wsize[{}]_ssize[{}]_dlen[{}]_ipts[{}]_pov[{}]_dlag[{}]", wsize, ssize, dlen, ipts, pov, dlag)
-        prepare = X -> prepare_fGn(X, dlag)
+        outstr = format("wsize[{}]_ssize[{}]_dlen[{}]_pov[{}]_dlag[{}]", wsize, ssize, dlen, pov, dlag)
+        prepare_data_for_estimator = X -> prepare_data_for_estimator_fGn(X, dlag)
         estim = X -> FracFin.fGn_MLE_estim(X, dlag; method=:optim, ε=1e-2)
     elseif cmd == "fWn-bspline-MLE"
         sclrng = 2 * parsed_args[cmd]["sclidx"]  # range of scales
         vm = parsed_args[cmd]["vm"]  # vanishing moments
-        outstr = format("wsize[{}]_ssize[{}]_dlen[{}]_ipts[{}]_pov[{}]_vm[{}]_sclrng[{}]", wsize, ssize, dlen, ipts, pov, vm, sclrng)
-        prepare = X -> prepare_bspline(X, sclrng, vm)
+        outstr = format("wsize[{}]_ssize[{}]_dlen[{}]_pov[{}]_vm[{}]_sclrng[{}]", wsize, ssize, dlen, pov, vm, sclrng)
+        prepare_data_for_estimator = X -> prepare_data_for_estimator_bspline(X, sclrng, vm)
         estim = X -> FracFin.fWn_bspline_MLE_estim(X, sclrng, vm; method=:optim, ε=1e-2)
     elseif cmd == "bspline-scalogram"
         ssize = wsize
@@ -270,8 +291,8 @@ function main()
         sclrng = 2 * parsed_args[cmd]["sclidx"]  # range of scales
         pow = parsed_args[cmd]["pow"]  # time-lags of finite difference
         vm = parsed_args[cmd]["vm"]  # vanishing moments
-        outstr = format("wsize[{}]_ipts[{}]_pov[{}]_pow[{}]_vm[{}]_sclrng[{}]", wsize, ipts, pov, pow, vm, sclrng)
-        prepare = X -> prepare_bspline(X, sclrng, vm)
+        outstr = format("wsize[{}]_pov[{}]_pow[{}]_vm[{}]_sclrng[{}]", wsize, pov, pow, vm, sclrng)
+        prepare_data_for_estimator = X -> prepare_data_for_estimator_bspline(X, sclrng, vm)
         estim = X -> FracFin.bspline_scalogram_estim(X, sclrng, vm; p=pow, mode=:left)
         # trans = X -> var(X, dims=2)
         # trans = X -> vec(FracFin.robustvar(X, dims=2))
@@ -285,107 +306,148 @@ function main()
     if verbose
         printfmtln("Loading file {}...", infile)
     end
-    # data0 = CSV.read(infile)
+    # toto = CSV.read(infile)
     toto = TimeSeries.readtimearray(infile, format=tfmt, delim=',')
     cname = TimeSeries.colnames(toto)[ncol]  # name of the column
-    unit = Dates.Minute(minimum(diff(TimeSeries.timestamp(toto))))
+
+    t0 = Dates.Hour(9) + Dates.Minute(5)
+    t1 = Dates.Hour(17) + Dates.Minute(24)
+
     data0 = toto[cname]
+    sdata0 = FracFin.split_by_day_with_truncation(data0, t0, t1)  # splitted data of identical length
+    data = vcat(sdata0...)
 
-    if Int(unit/Dates.Minute(1)) < 1440  # intraday data
-        tdta, tdtb = Dates.Time(idta), Dates.Time(idtb)
-        dha, dhb = Dates.Hour(tdta), Dates.Hour(tdtb)
-        dma, dmb = Dates.Minute(tdta), Dates.Minute(tdtb)
-        daytime = (dha+dma, dhb+dmb)
+    # data = TimeArray(TimeSeries.timestamp(toto), TimeSeries.values(toto)[:,ncol])
+    any(isnan.(TimeSeries.values(data))) && error("NaN values detected in input data!")
 
-        Xm, Tm, Xt, Tt = [], [], [], []
-        sdata0 = []
-
-        if ipts>0
-            wh = (dhb-dha) ÷ ipts + dmb-dma # length of intraday window
-            nh = Int((dhb-dha)/Dates.Hour(1)) # number of hours in intraday data
-            dh = nh ÷ ipts
-            windows = [(w=daytime[1]+Dates.Hour(n); (w,w+wh)) for n=0:dh:(nh-1)]
-
-            # splitted data of identical length
-            Xms = []
-            Tms = []
-            for (wa,wb) in windows
-                sdata0 = FracFin.window_split_timearray(data0, Dates.Hour(24), (wa,wb), fillmode=:fb, endpoint=false)
-                push!(Xms, log.(hcat([TimeSeries.values(v) for v in sdata0]...)))
-                # println(length(sdata0))
-                # println(size(Xms[end]))
-                push!(Tms, hcat([TimeSeries.timestamp(v) for v in sdata0]...))
-            end
-
-            Xm = reshape(vcat(Xms...), (size(Xms[1],1), :))
-            Tm = reshape(vcat(Tms...), (size(Tms[1],1), :))
-            Xt = mean(Xm, dims=1)[:]
-            Tt = [Dates.DateTime(t) for t in Tm[1,:]]
-        else
-            sdata0 = FracFin.window_split_timearray(data0, Dates.Hour(24), daytime, fillmode=:fb, endpoint=false)
-            Xm = reshape(vcat(TimeSeries.values.(sdata0)...), 1, :)
-            Tt = vcat(TimeSeries.timestamp.(sdata0)...)
-            Xt = Xm[1, :]
-        end
-        # println(size(Xm))
-        # println(size(Tm))
-        # println(size(Xt))
-        # println(size(Tt))
-
-        Res = []
-        for r = 1:size(Xm,1)
-            Xi = prepare(Xm[r,:])  # input to rolling estimator
-            res = FracFin.rolling_estim(estim, Xi, (wsize,ssize,dlen), pov, mode=:causal)
-            push!(Res, res)
-        end
-
-        Hm = hcat([[x[2][1][1] for x in res] for res in Res]...)'
-        σm = hcat([[x[2][1][2] for x in res] for res in Res]...)'
-        tidx = [x[1] for x in Res[1]]
-
-        # embedding into a longer time series
-        Ht = fill(NaN, length(Tt)); Ht[tidx] = mean(Hm, dims=1)[:]
-        σt = fill(NaN, length(Tt)); σt[tidx] = mean(σm, dims=1)[:]
-        Hs = fill(NaN, length(Tt)); Hs[tidx] = std(Hm, dims=1)[:]
-        σs = fill(NaN, length(Tt)); σs[tidx] = std(σm, dims=1)[:]
-
-        At = TimeSeries.TimeArray(Tt, [Xt Ht Hs σt σs], ["Log_Price", "Hurst", "Hurst_std", "σ", "σ_std"])
-
-        # make the output folder
-        outdir = format("{}/{}/{}/{}/{}/", outdir0, sname, cname, cmd, outstr)
-        try
-            mkpath(outdir)
-        catch
-        end
-
-        TimeSeries.writetimearray(At, format("{}/estimate.csv",outdir))
-        # At = TimeArray(T0[tidx], [X0[tidx] Ht σt Hs σs], ["Log_Price", "Hurst", "Hurst_std" "σ" "σ_std"])
-        # TimeSeries.writetimearray(At, format("{}/estimate-ts.csv",outdir))
-
-        fig1 = plot(Tt, Xt, ylabel="Log Price", label="")
-        fig2 = plot(Tt, Ht, ribbon=(2*Hs, 2*Hs), ylim=[0,1], shape=:circle, ylabel="Hurst", label="")
-        hline!(fig2, [0.5], width=[3], color=[:red], label="")
-        fig3 = plot(Tt, σt, ribbon=(2*σs, 2*σs), shape=:circle, ylabel="σ", label="")
-        plot(fig1, fig2, fig3, layout=(3,1), size=(1200,900), legend=true)
-        savefig(format("{}/estimate.pdf",outdir))
-
-        if ipts==0
-            sdata1 = FracFin.window_split_timearray(At, Dates.Hour(24); fillmode=:o, endpoint=true)
-            for Y0 in sdata1
-                T0 = TimeSeries.timestamp(Y0)
-                fig1 = plot(Y0[:Log_Price], ylabel="Log Price", label="")
-                fig2 = plot(Y0[:Hurst], shape=:circle, ylabel="Hurst", label="")
-                fig3 = plot(Y0[:σ], shape=:circle, ylabel="σ", label="")
-                fig4 = plot(Y0[:Hurst], ylim=[0,1], shape=:circle, ylabel="Hurst", label="")
-                hline!(fig4, [0.5], width=[3], color=[:red], label="")
-                plot(fig1, fig2, fig3, fig4, layout=(4,1), size=(1200,900), xticks=T0[1]:Dates.Hour(1):T0[end], legend=true)
-                savefig(format("{}/{}.pdf",outdir, Dates.Date(T0[1])))
-                # TimeSeries.writetimearray(Yt, format("{}/csv/{}.csv",outdir, day))
-            end
-        end
-    else
+    # make the output folder
+    outdir = format("{}/{}/{}/{}/{}/", outdir0, sname, cname, cmd, outstr)
+    try
+        mkpath(outdir)
+        mkpath(outdir * "/csv/")
+    catch
     end
 
+    # process consolidated dataset
+    if verbose
+        printfmtln("Processing the consolidated dataset...")
+    end
+
+    T0, X0 = TimeSeries.timestamp(data), log.(TimeSeries.values(data))
+
+    # day_start = TimeSeries.Date(data.timestamp[1])
+    # day_end = TimeSeries.Date(data.timestamp[end]) + Dates.Day(1)
+    # t0 = Dates.DateTime(day_start)
+    # t1 = Dates.DateTime(day_end)
+    # D0 = data[t0:Dates.Minute(1):t1]  # Minute or Hours, but Day won't work  <- Bug here
+    # T0, X0 = D0.timestamp, log.(D0.values)  # log price
+
+    Xdata = prepare_data_for_estimator(X0)
+
+    # estimation of hurst and σ
+    res= FracFin.rolling_estim(estim, Xdata, (wsize, ssize, dlen), pov, trans; mode=:causal)
+    Ht = [x[2][1][1] for x in res]
+    σt = [x[2][1][2] for x in res]
+    tidx = [x[1] for x in res]
+    # fit in
+    Ht0 = fill(NaN, length(T0)); Ht0[tidx] = Ht
+    σt0 = fill(NaN, length(T0)); σt0[tidx] = σt
+
+    A0 = TimeArray(T0, [X0 Ht0 σt0], ["Log_Price", "Hurst", "σ"])
+    At = TimeArray(T0[tidx], [X0[tidx] Ht σt], ["Log_Price", "Hurst", "σ"])
+
+    #     title_str = format("{}, wsize={}", sname, wsize)
+    # fig1 = plot(A0["Log-price"], title=title_str, ylabel="Log-price", label="")
+    # fig2 = plot(A0["Hurst"], shape=:circle, ylabel="Hurst", label="")
+    # fig3 = plot(A0["σ"], shape=:circle, ylabel="σ", label="")
+    # fig4 = plot(A0["Hurst"], ylim=[0,1], shape=:circle, ylabel="Hurst", label="")
+    # plot!(fig4, T0, 0.5*ones(length(T0)), w=3, color=:red, label="")
+    # plot(fig1, fig2, fig3, fig4, layout=(4,1), size=(1200,1000), legend=true)
+    # outfile = format("{}/estime.pdf",outdir)
+    # savefig(outfile)
+
+    fig1 = plot(A0[:Log_Price], ylabel="Log Price", label="")
+    fig2 = plot(A0[:Hurst], shape=:circle, ylabel="Hurst", label="")
+    fig3 = plot(A0[:σ], shape=:circle, ylabel="σ", label="")
+    fig4 = plot(A0[:Hurst], ylim=[0,1], shape=:circle, ylabel="Hurst", label="")
+    plot!(fig4, T0, 0.5*ones(length(T0)), w=3, color=:red, label="")
+    plot(fig1, fig2, fig3, fig4, layout=(4,1), size=(1200,1000), legend=true)
+    savefig(format("{}/estimate-ts.pdf",outdir))
+
+    fig1 = plot(TimeSeries.values(At[:Log_Price]), ylabel="Log Price", label="")
+    fig2 = plot(TimeSeries.values(At[:Hurst]), shape=:circle, ylabel="Hurst", label="")
+    fig3 = plot(TimeSeries.values(At[:σ]), shape=:circle, ylabel="σ", label="")
+    fig4 = plot(TimeSeries.values(At[:Hurst]), ylim=[0,1], shape=:circle, ylabel="Hurst", label="")
+    plot!(fig4, 1:length(tidx), 0.5*ones(length(tidx)), w=3, color=:red, label="")
+    plot(fig1, fig2, fig3, fig4, layout=(4,1), size=(1200,1000), legend=true)
+    savefig(format("{}/estimate.pdf",outdir))
+    TimeSeries.writetimearray(At, format("{}/csv/estimate.csv",outdir))
+
+    if intraday
+        S0 = split_timearray_by_day(A0)
+        St = split_timearray_by_day(At)
+
+        for (Y0, Yt) in zip(S0, St)
+            day = Dates.Date(TimeSeries.timestamp(Y0)[1])
+            fig1 = plot(Y0[:Log_Price], ylabel="Log Price", label="")
+            fig2 = plot(Y0[:Hurst], shape=:circle, ylabel="Hurst", label="")
+            fig3 = plot(Y0[:σ], shape=:circle, ylabel="σ", label="")
+            fig4 = plot(Y0[:Hurst], ylim=[0,1], shape=:circle, ylabel="Hurst", label="")
+            plot!(fig4, Y0.timestamp, 0.5*ones(length(T0)), w=3, color=:red, label="")
+            plot(fig1, fig2, fig3, fig4, layout=(4,1), size=(1200,1000), xticks=T0[1]:Dates.Hour(1):T0[end], legend=true)
+            savefig(format("{}/{}.pdf",outdir, day))
+            TimeSeries.writetimearray(Yt, format("{}/csv/{}.csv",outdir, day))
+        end
+    end
+
+    # if intraday
+    #     day_iter = day_start:Dates.Day(1):day_end
+    #     for (n,day) in enumerate(day_iter)
+    #         if verbose
+    #             printfmt("Processing {} of {} days...\r", n, length(day_iter))
+    #         end
+
+    #         t0 = Dates.DateTime(day)
+    #         t1 = t0+Dates.Day(1)
+    #         D0 = data[t0:Dates.Minute(1):t1]  # Minute or Hours, but Day won't work
+
+    #         if length(D0)>0
+    #             # log price
+    #             T0, X0 = D0.timestamp, log.(D0.values)
+
+    #             # prepare data for estimator
+    #             Xdata = prepare_data_for_estimator(X0)
+
+    #             # estimation of hurst and σ
+    #             res = FracFin.rolling_estim(estim, Xdata, (wsize, ssize, dlen), pov, trans; mode=:causal)
+    #             Ht = [x[2][1][1] for x in res]
+    #             σt = [x[2][1][2] for x in res]
+    #             tidx = [x[1] for x in res]
+    #             # fit in
+    #             Ht0 = fill(NaN, length(T0)); Ht0[tidx] = Ht
+    #             σt0 = fill(NaN, length(T0)); σt0[tidx] = σt
+
+    #             # plot
+    #             title_str = format("{}, wsize={}", sname, wsize)
+    #             fig1 = plot(T0, X0, title=title_str, ylabel="Log-price", label="")
+    #             fig2 = plot(T0, Ht0, shape=:circle, ylabel="Hurst", label="")
+    #             fig3 = plot(T0, σt0, shape=:circle, ylabel="σ", label="")
+    #             fig4 = plot(T0, Ht0, ylim=[0,1], shape=:circle, ylabel="Hurst", label="")
+    #             plot!(fig4, T0, 0.5*ones(length(T0)), w=3, color=:red, label="")
+    #             plot(fig1, fig2, fig3, fig4, layout=(4,1), size=(1200,1000), xticks=T0[1]:Dates.Hour(1):T0[end], legend=true)
+    #             #         fig2a = plot(T0, Ht0, ylabel="Hurst", label="Hurst")
+    #             #         fig2b = twinx(fig2a)
+    #             #         plot!(fig2b, T0, σt0, yrightlabel="σ", color=:red, label="σ")
+    #             #         plot(fig1, fig2a, layout=(2,1), size=(1200,600), legend=true)
+    #             outfile = format("{}/{}.pdf",outdir, day)
+    #             savefig(outfile)
+
+    #             At = TimeArray(T0[tidx], [Ht σt], ["Hurst", "σ"])
+    #             outfile = format("{}/csv/{}.csv",outdir, day)
+    #             TimeSeries.writetimearray(At, outfile)
+    #         end
+    #     end
+    # end
 
     if verbose
         printfmtln("Outputs saved in {}", outdir)
