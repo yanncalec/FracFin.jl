@@ -5,7 +5,7 @@ Auto-Correlation function by RCall.
 """
 function acf(X::AbstractVector{T}, lagmax::Int) where {T<:Real}
     res = RCall.rcopy(RCall.rcall(:acf, X, lagmax, plot=false, na_action=:na_pass))
-    return res[:acf][1:end-1]
+    return res[:acf][2:end]
 end
 
 """

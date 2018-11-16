@@ -87,6 +87,18 @@ function prepare_bspline(X0::AbstractVector{T}, sclrng::AbstractVector{Int}, vm:
 end
 
 
+function equalize_daynight(sdata)
+    edata = [sdata[1]]
+    for n=2:length(sdata)
+        d0 = TimeSeries.values(edata[n-1])
+        d1 = TimeSeries.values(sdata[n])
+        t1 = TimeSeries.timestamp(sdata[n])
+        push!(edata, TimeSeries.TimeArray(t1, d1.-(d1[1]-d0[end]), TimeSeries.colnames(sdata[1])))
+    end
+    return edata
+end
+
+
 function parse_commandline()
     settings = ArgParseSettings("Apply rolling window estimator of fBm.")
 
@@ -119,6 +131,9 @@ function parse_commandline()
         help = " ending time of truncation (for intraday data only)"
         arg_type = String
         default = "17:25"
+        "--eql"
+        help = "Equalize the opening and close values of two consecutive days (for ipts=0 only)"
+        action = :store_true
         "--tfmt"
         help = "time format for parsing csv file"
         arg_type = String
@@ -233,6 +248,7 @@ function main()
     dlen = parsed_args["dlen"]  # length of decorrelation
     pov = parsed_args["pov"]  # period of innovation
     ipts = parsed_args["ipts"]  # number of pts per day
+    eql = parsed_args["eql"]
     idta = parsed_args["idta"]
     idtb = parsed_args["idtb"]
     tfmt = parsed_args["tfmt"]  # time format
@@ -323,9 +339,14 @@ function main()
             Tt = [Dates.DateTime(t) for t in Tm[1,:]]
         else
             sdata0 = FracFin.window_split_timearray(data0, Dates.Hour(24), daytime, fillmode=:fb, endpoint=false)
-            Xm = log.(reshape(vcat(TimeSeries.values.(sdata0)...), 1, :))
-            Tt = vcat(TimeSeries.timestamp.(sdata0)...)
-            Xt = Xm[1, :]
+            sdata1 = eql ? sdata0 : equalize_daynight(sdata0)
+            data1 = vcat(sdata1...)
+            Tt = TimeSeries.timestamp(data1)
+            Xm = log.(reshape(TimeSeries.values(data1), 1, :))
+            Xt = log.(TimeSeries.values(vcat(sdata0...)))
+            # Xm = log.(reshape(vcat(TimeSeries.values.(sdata0)...), 1, :))
+            # Tt = vcat(TimeSeries.timestamp.(sdata0)...)
+            # Xt = Xm[1, :]
         end
         # println(size(Xm))
         # println(size(Tm))
@@ -335,7 +356,7 @@ function main()
         Res = []
         for r = 1:size(Xm,1)
             Xi = prepare(Xm[r,:])  # input to rolling estimator
-            res = FracFin.rolling_estim(estim, Xi, (wsize,ssize,dlen), pov, mode=:causal)
+            res = FracFin.rolling_estim(estim, Xi, (wsize,ssize,dlen), pov, trans; mode=:causal)
             push!(Res, res)
         end
 

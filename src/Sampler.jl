@@ -182,7 +182,7 @@ function rand_fBm(sampler::Sampler, Tmax::Real=1.)
         X = δ^H * rand(sampler)
     end
 
-    X .-= X[1]  # force starting from 0
+    # X .-= X[1]  # force starting from 0
     return X
 end
 
