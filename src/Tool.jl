@@ -264,6 +264,16 @@ row_normalize(A) = col_normalize(transpose(A))
 row_normalize!(A) = col_normalize!(transpose(A))
 
 
+"""
+Compute d-lag finite difference of a vector.
+"""
+function lagdiff(X::AbstractVector{<:Real}, d::Int, mode::Symbol=:causal) 
+    dX = fill(NaN, length(X))
+    dX[d+1:end] = X[d+1:end]-X[1:end-d]
+    return (mode==:causal) ? dX : circshift(dX, -d)
+end
+
+
 ###### Time series manipulation ######
 
 function ffill!(X::AbstractVector{T}) where T<:Number
@@ -371,3 +381,22 @@ function split_by_day(data::TimeArray)
 
     return res
 end
+
+
+"""
+Equalize the first point of the day with the last point of the previous day.
+
+# Notes
+- Useful in processing of stock price
+"""
+function equalize_daynight(sdata)
+    edata = [sdata[1]]
+    for n=2:length(sdata)
+        d0 = TimeSeries.values(edata[n-1])
+        d1 = TimeSeries.values(sdata[n])
+        t1 = TimeSeries.timestamp(sdata[n])
+        push!(edata, TimeSeries.TimeArray(t1, d1.-(d1[1]-d0[end]), TimeSeries.colnames(sdata[1])))
+    end
+    return edata
+end
+

@@ -216,41 +216,6 @@ end
 #### fWn-MLE ####
 # A fWn is the filtration of a fBm time series by a bank of high pass filters, eg, multiscale wavelet filters.
 
-"""
-Compute the covariance matrix of a fWn at some time lag.
-
-# Args
-- F: array of band pass filters (no DC component)
-- l: time lag
-- H: Hurst exponent
-"""
-function fWn_covmat_lag(F::AbstractVector{<:AbstractVector{T}}, l::Int, H::Real) where {T<:Real}
-    L = maximum([length(f) for f in F])  # maximum length of filters
-    # M = [abs(l+(n-m))^(2H) for n=0:L-1, m=0:L-1]  # matrix comprehension is ~ 10x slower
-    M = zeros(L,L)
-    for n=1:L, m=1:L
-        M[n,m] = abs(l+(n-m))^(2H)
-    end
-    Σ = -1/2 * [ψi' * view(M, 1:length(ψi), 1:length(ψj)) * ψj for ψi in F, ψj in F]
-end
-
-
-"""
-Compute the covariance matrix of a time-concatenated fWn.
-"""
-function fWn_covmat(F::AbstractVector{<:AbstractVector{T}}, lmax::Int, H::Real) where {T<:Real}
-    J = length(F)
-    Σ = zeros(((lmax+1)*J, (lmax+1)*J))
-    Σs = [fWn_covmat_lag(F, d, H) for d = 0:lmax]
-
-    for r = 0:lmax
-        for c = 0:lmax
-            Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (c>=r) ? Σs[c-r+1] : transpose(Σs[r-c+1])
-        end
-    end
-
-    return Matrix(Symmetric(Σ))  #  forcing symmetry
-end
 
 
 """
@@ -340,8 +305,11 @@ end
 #### fGn-MLE ####
 # A special case of fWn-MLE which deserves it own implementation.
 
-function covmat(s::AbstractVector{T}) where {T<:Real}
-    [s[abs(n-m)+1] for n=1:length(s), m=1:length(s)]
+"""
+Construct the covariance matrix of a stationary process from the covariance sequence.
+"""
+function covmat(S::AbstractVector{T}) where {T<:Real}
+    [S[abs(n-m)+1] for n=1:length(S), m=1:length(S)]
 end
 
 function fGn_covfunc(H::Real, n::Int, d::Int)

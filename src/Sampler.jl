@@ -182,7 +182,7 @@ function rand_fBm(sampler::Sampler, Tmax::Real=1.)
         X = δ^H * rand(sampler)
     end
 
-    X .-= X[1]  # force starting from 0
+    # X .-= X[1]  # force starting from 0
     return X
 end
 
@@ -654,32 +654,6 @@ end
 
 ######## Sampler for multifractional Brownian motion (mBm) and related processes ########
 
-# Auxiliary functions for the covariance of the  multifractional field
-_D(h1,h2) = (h1==h2) ? 1. : sqrt(gamma(2*h1+1)*sin(pi*h1)*gamma(2*h2+1)*sin(pi*h2)) / (gamma(h1+h2+1)*sin(pi*(h1+h2)/2))
-# or equivalently
-# _F(h) = lgamma(2h+1) + log(sin(π*h))
-# _D(h1,h2) = exp((_F(h1)+_F(h2))/2 - _F((h1+h2)/2))
-
-_gn(t,s,h) = (abs(t)^(h) + abs(s)^(h) - abs(t-s)^(h))/2  # non-stationary
-_gs(t,h) = (abs(t+1)^(h) + abs(t-1)^(h) - 2*abs(t)^(h))/2  # stationary
-
-"""
-    mBm_cov(t1::Real,t2::Real,h1::Real,h2::Real)
-
-Covariance of multifractional Brownian motion.
-"""
-function mBm_cov(t1::Real,t2::Real,h1::Real,h2::Real)
-    _D(h1,h2) * _gn(t1,t2,h1+h2)
-end
-
-"""
-    mGn_cov(t::Real,h1::Real,h2::Real)
-
-Covariance of multifractional Gaussian noise.
-"""
-function mGn_cov(t::Real,h1::Real,h2::Real)
-    _D(h1,h2) * _gs(t,h1+h2)
-end
 
 
 """

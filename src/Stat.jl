@@ -5,7 +5,7 @@ Auto-Correlation function by RCall.
 """
 function acf(X::AbstractVector{T}, lagmax::Int) where {T<:Real}
     res = RCall.rcopy(RCall.rcall(:acf, X, lagmax, plot=false, na_action=:na_pass))
-    return res[:acf][1:end-1]
+    return res[:acf][2:end]
 end
 
 """
@@ -231,9 +231,65 @@ end
 Rolling mean in row direction.
 """
 function rolling_mean(X0::AbstractVecOrMat{T}, w::Int, d::Int=1; boundary::Symbol=:hard) where {T<:Number}
-    return if boundary == :hard
+    Xm = if boundary == :hard
         rolling_apply_hard(x->mean(x, dims=2), X0, w, d)
     else
         rolling_apply_soft(x->mean(x, dims=2), X0, w, d)
     end
+    return ndims(X0)>1 ? Xm : vec(Xm)
+end
+
+
+
+function rolling_estim_predict(estim::Function, predict::Function, X0::AbstractVecOrMat{T}, (w,s,d)::Tuple{Int,Int,Int}, p::Int, trans::Function=(x->vec(x)); mode::Symbol=:causal, nan::Symbol=:ignore) where {T<:Number}    
+    X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
+    L = size(X,2)
+    # println(L); println(w); println(s)
+    # @assert w >= s && L >= s
+    res = []
+
+    if mode == :causal  # causal
+        for t = L:-p:1
+            # xv = view(X, :, t:-1:max(1, t-w+1))
+            xv = view(X, :, max(1, t-w+1):t)
+            xs = if nan == :ignore
+                idx = findall(.!any(isnan.(xv), dims=1)[:])  # ignore columns containing nan values
+                if length(idx) > 0
+                    rolling_apply_hard(trans, view(xv,:,idx), s, d; mode=:causal)
+                else
+                    []
+                end
+            else
+                rolling_apply_hard(trans, xv, s, d; mode=:causal)
+            end
+
+            if length(xs) > 0
+                # println(size(xs))
+                Θ = estim(squeezedims(xs, dims=[1,2]))  # estimations
+                Π = predict(Θ, xv)
+                pushfirst!(res, (t,Π))
+            end
+        end
+    else  # anticausal
+        for t = 1:p:L
+            xv = view(X, :, t:min(L, t+w-1))
+            xs = if nan == :ignore
+                idx = findall(.!any(isnan.(xv), dims=1)[:])  # ignore columns containing nan values
+                if length(idx) > 0
+                    rolling_apply_hard(trans, view(xv,:,idx), s, d; mode=:anticausal)
+                else
+                    []
+                end
+            else
+                rolling_apply_hard(trans, xv, s, d; mode=:anticausal)
+            end
+            
+            if length(xs) > 0
+                Θ = estim(squeezedims(xs, dims=[1,2]))  # estimations
+                Π = predict(Θ, xv)
+                push!(res, (t,Π))
+            end
+        end
+    end
+    return res
 end

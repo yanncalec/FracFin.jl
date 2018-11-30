@@ -115,5 +115,6 @@ include("Tool.jl")
 include("CHA.jl")
 include("Stat.jl")        
 include("Estimator.jl")
+include("Trading.jl")
 
 end # module

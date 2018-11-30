@@ -479,3 +479,147 @@ FARIMA(d::Float64) = FARIMA(d, Float64[], Float64[])
 # parameters(X::FARIMA{P,Q}) where {P,Q} = (P, X.d, Q)
 
 # FARIMA(d::Float64, ar::Vector{Float64}, ma::Vector{Float64}) = FARIMA{length(ar), length(ma)}(d, ar, ma)
+
+
+############################
+
+function fBm_covmat(G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, H::Real)
+    Σ = zeros(length(G1),length(G2))
+    for c=1:length(G2), r=1:length(G1)
+        Σ[r,c] = (abs(G1[r])^(2H) + abs(G2[c])^(2H) - abs(G1[r]-G2[c])^(2H))/2
+    end
+    return Σ
+end
+
+fBm_covmat(G::AbstractVector, H) = Matrix(Symmetric(fBm_covmat(G, G, H)))
+
+
+function fBm_cond_mean(Gx::AbstractVector{<:Real}, Gy::AbstractVector{<:Real}, Y::AbstractVector{<:Real}, H::Real)
+    @assert length(Gy) == length(Y)
+    Σxy = fBm_covmat(Gx, Gy, H)
+    Σyy = fBm_covmat(Gy, Gy, H)
+    return Σxy * (Σyy\Y)
+end
+
+
+function fBm_cond_mean(gx::Real, Gy::AbstractVector{<:Real}, Y::AbstractVector{<:Real}, H::Real)
+    return fBm_cond_mean([gx], Gy, Y, H)
+end
+
+
+function fBm_cond_cov(Gx::AbstractVector{<:Real}, Gy::AbstractVector{<:Real}, Y::AbstractVector{<:Real}, H::Real)
+    Σxx = fBm_covmat(Gx, Gx, H)
+    Σxy = fBm_covmat(Gx, Gy, H)
+    Σyy = fBm_covmat(Gy, Gy, H)
+    return Σxx - Σxy * inv(Σyy) * Σxy'
+end
+
+
+"""
+Compute the covariance matrix of a fWn at some time lag.
+
+# Args
+- F: array of band pass filters (no DC component)
+- d: time lag
+- H: Hurst exponent
+"""
+function fWn_covmat_lag(F::AbstractVector{<:AbstractVector{T}}, d::Int, H::Real) where {T<:Real}
+    L = maximum([length(f) for f in F])  # maximum length of filters
+    # M = [abs(d+(n-m))^(2H) for n=0:L-1, m=0:L-1]  # matrix comprehension is ~ 10x slower
+    M = zeros(L,L)
+    for n=1:L, m=1:L
+        M[n,m] = abs(d+(n-m))^(2H)
+    end
+    Σ = -1/2 * [f' * view(M, 1:length(f), 1:length(g)) * g for f in F, g in F]
+end
+
+
+"""
+Compute the covariance matrix of a time-concatenated fWn.
+"""
+function fWn_covmat(F::AbstractVector{<:AbstractVector{T}}, lmax::Int, H::Real) where {T<:Real}
+    J = length(F)
+    Σ = zeros(((lmax+1)*J, (lmax+1)*J))
+    Σs = [fWn_covmat_lag(F, d, H) for d = 0:lmax]
+
+    for r = 0:lmax
+        for c = 0:lmax
+            Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (c>=r) ? Σs[c-r+1] : transpose(Σs[r-c+1])
+        end
+    end
+
+    return Matrix(Symmetric(Σ))  #  forcing symmetry
+end
+
+
+
+# Auxiliary functions for the covariance of the  multifractional field
+_D(h1,h2) = (h1==h2) ? 1. : sqrt(gamma(2*h1+1)*sin(pi*h1)*gamma(2*h2+1)*sin(pi*h2)) / (gamma(h1+h2+1)*sin(pi*(h1+h2)/2))
+# or equivalently
+# _F(h) = lgamma(2h+1) + log(sin(π*h))
+# _D(h1,h2) = exp((_F(h1)+_F(h2))/2 - _F((h1+h2)/2))
+
+# h actually corresponds to 2h here:
+_gn(t,s,h) = (abs(t)^(h) + abs(s)^(h) - abs(t-s)^(h))/2  # non-stationary
+_gs(t,h) = (abs(t+1)^(h) + abs(t-1)^(h) - 2*abs(t)^(h))/2  # stationary
+
+
+"""
+Covariance of multifractional Brownian motion.
+"""
+function mBm_cov(t1::Real, t2::Real, h1::Real, h2::Real)
+    _D(h1, h2) * _gn(t1, t2, h1+h2)
+end
+
+
+function mBm_covmat(G1::AbstractVector{<:Real}, H1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, H2::AbstractVector{<:Real})
+    @assert length(G1) == length(H1)
+    @assert all(0 .< H1 .< 1)
+    @assert length(G2) == length(H2)
+    @assert all(0 .< H2 .< 1)
+
+    N1, N2 = length(G1), length(G2)
+    Σ = zeros(N1,N2)
+    
+    for c=1:N2, r=1:N1
+        Σ[r,c] = mBm_cov(G1[r], G2[c], H1[r], H2[c])
+    end
+    return Σ
+end
+
+mBm_covmat(G::AbstractVector{<:Real}, H::AbstractVector{<:Real}) = mBm_covmat(G, H, G, H)
+
+mBm_covmat(G::AbstractVector{<:Real}, H::Real) = mBm_covmat(G, H)
+
+
+
+
+"""
+(Approximate) Covariance of multifractional Gaussian noise.
+"""
+function mGn_cov(t1::Real, t2::Real, h1::Real, h2::Real)
+    _D(h1, h2) * _gs(t1-t2, h1+h2)
+end
+
+
+function mGn_covmat(G1::AbstractVector{<:Real}, H1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, H2::AbstractVector{<:Real})
+    @assert length(G1) == length(H1)
+    @assert all(0 .< H1 .< 1)
+    @assert length(G2) == length(H2)
+    @assert all(0 .< H2 .< 1)
+
+    N1, N2 = length(G1), length(G2)
+    Σ = zeros(N1,N2)
+    
+    for c=1:N2, r=1:N1
+        Σ[r,c] = mGn_cov(G1[r], G2[c], H1[r], H2[c])
+    end
+    return Σ
+end
+
+
+mGn_covmat(G::AbstractVector{<:Real}, H::AbstractVector{<:Real}) = mGn_covmat(G, H, G, H)
+
+mGn_covmat(G::AbstractVector{<:Real}, H::Real) = mGn_covmat(G, H)
+
+
