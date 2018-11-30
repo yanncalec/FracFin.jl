@@ -405,6 +405,7 @@ function rand(p::FARIMA, s::HoskingSampler{T, <:FractionalIntegrated, G}) where 
     # or equivalently, invoke(rand!, Tuple{Vector{Float64}, HoskingSampler}, x, s)
 
     # step 2: generate an ARMA process
+    # REVIEW 15/11/2018: NOT SURE about this implementation!!
     x = conv(x, [1; p.ma])[1:end-ma_len]
     if ar_len > 0
         for t = (ar_len+1):length(s)

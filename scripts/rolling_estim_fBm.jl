@@ -383,12 +383,12 @@ function main()
                 # TimeSeries.writetimearray(Yt, format("{}/csv/{}.csv",outdir, day))
             end
         end
+
+        if verbose
+            printfmtln("Outputs saved in {}", outdir)
+        end
     else
-    end
 
-
-    if verbose
-        printfmtln("Outputs saved in {}", outdir)
     end
 end
 
