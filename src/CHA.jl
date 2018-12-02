@@ -24,14 +24,14 @@ function convolution_matrix(h::AbstractVector{T}, N::Int) where {T<:Number}
         K[:,n+1] = circshift(hz,n)
     end
     return K[M:end,:]'
-    
+
     # Another more efficient implementation
     # for r=1:M
     #     for d=1:M+N-r
     #         K[d+r-1,d] = h[r]
     #     end
     # end
-    # return K[:,1:N]    
+    # return K[:,1:N]
 end
 
 
@@ -223,7 +223,7 @@ Quadratic mirrored filter.
 # Notes
 - IMPORTANT: convention of qmf is (-1).^(0:length(h)-1) NOT (-1).^(1:length(h))
 """
-function qmf(h::AbstractVector{T}) where {T<:Number} 
+function qmf(h::AbstractVector{T}) where {T<:Number}
     reverse(h .* (-1).^(0:length(h)-1))  # reverse(x) = x[end:-1:1]
 end
 
@@ -262,14 +262,14 @@ function swt(x::AbstractVector{T}, lo::AbstractVector{T}, hi::AbstractVector{T},
     for n = 1:level
         # up-sampling of qmf filters
         lo_up = upsampling(lo, 2^(n-1), tight=true)
-        hi_up = upsampling(hi, 2^(n-1), tight=true)        
+        hi_up = upsampling(hi, 2^(n-1), tight=true)
         km, vm = convmask(nx, length(lo_up), mode)
-        
+
         mc[:,n] = vm[km]
         dc[:,n] = fct * conv(hi_up, ac[:,n])[km]
         ac[:,n+1] = fct * conv(lo_up, ac[:,n])[km]
     end
-    
+
     return  ac[:,2:end], dc, mc
 end
 
@@ -294,7 +294,7 @@ function iswt(ac::AbstractVector{T}, dc::AbstractMatrix{T}, lo::AbstractVector{T
         hi_up = upsampling(hi, 2^(n-1), tight=true)
         km, vm = convmask(nx, length(lo_up), mode)
 
-        fill!(mask, 0); mask[1:2^(n):end] = 1 
+        fill!(mask, 0); mask[1:2^(n):end] = 1
         xr = fct * (conv(hi_up, mask .* view(dc,:,n)) + conv(lo_up, mask .* xr))[km]
     end
     return xr
@@ -335,7 +335,7 @@ function swt(x0::AbstractVector{T}, wvl::String, maxlevel::Int; mode::Symbol=:le
     wavelet = pywt[:Wavelet](wvl)
     dec_lo, dec_hi, rec_lo, rec_hi = wavelet[:inverse_filter_bank]
     nf = length(dec_lo)  # filter length
-    
+
     # zero padding
     n0 = length(x0)
     nx = 2^(ceil(Int, log2(n0)))  # length of zero-padded signal
@@ -351,13 +351,13 @@ function swt(x0::AbstractVector{T}, wvl::String, maxlevel::Int; mode::Symbol=:le
         else
             error("Unknown mode: $mode")
         end
-    x[s:s+n0-1] = x0    
-    
+    x[s:s+n0-1] = x0
+
     zmask = zeros(Bool, nx); zmask[s:s+n0-1] .= true
     # mask = ones(Bool, nx)
 
     w0 = pywt[:swt](x, wvl, level=nlvl)
-    
+
     # ac = hcat([c[1][mask] for c in w0]...)
     # dc = hcat([c[2][mask] for c in w0]...)
     ac0 = hcat([c[1] for c in w0]...)
@@ -374,13 +374,13 @@ function swt(x0::AbstractVector{T}, wvl::String, maxlevel::Int; mode::Symbol=:le
         mask[idx] .= true
         push!(vmasks, mask)
         # # truncation both sides
-        # push!(ac, ac0[mask0,s][nb:end-nb+1])  
+        # push!(ac, ac0[mask0,s][nb:end-nb+1])
         # push!(dc, dc0[mask0,s][nb:end-nb+1])
     end
 
     # return (ac0, dc0, mask0), (ac, dc, mask), nf
     return ac0, dc0, zmask, vmasks
-end    
+end
 
 
 """
@@ -407,7 +407,7 @@ end
 
 
 # function dyadic_wavelet_filters()
-    
+
 # end
 
 """
@@ -593,9 +593,9 @@ end
 Evaluate the Fourier transform of a centered B-Spline wavelet.
 
 # Notes
-- Convention of Fourier transform: 
+- Convention of Fourier transform:
     F(ω) = 1/√2π \\int f(t)e^{iωt} dt
-- Convention of Fourier transform: 
+- Convention of Fourier transform:
     f(t) = 1/√2π \\int F(ω)e^{-iωt} dω
 """
 function _bspline_ft(ω::Real, v::Int)
@@ -659,8 +659,8 @@ end
 Evaluate the function C^ψ_ρ(τ,H) by numerical integration.
 """
 function Cψρ_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
-    @assert ρ>0 
-    @assert 1>H>0 
+    @assert ρ>0
+    @assert 1>H>0
     @assert v>H+1/2  # otherwise may raise `DomainError with 0.0`
 
     f = ω -> Cψρ_bspline_integrand(τ, ω, ρ, H, v, mode)
@@ -689,27 +689,3 @@ function Amat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractVector{Int}, m
     # all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
     return gamma(2H+1) * sin(π*H) * [Cψρ_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
 end
-
-"""
-Evaluate A_ρ(τ, H)
-
-# Args
-- τ, ρ, H: see definition
-- v: vanishing moments of the wavelet ψ
-- mode: {:left, :center, :right} for causal, centered, anti-causal ψ
-"""
-Aρ_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol) = gamma(2H+1) * sin(π*H) * Cψρ_bspline(τ, ρ, H, v, mode)
-
-diff_gamma = x -> ForwardDiff.derivative(gamma, x)
-
-"""
-Derivative w.r.t. H
-"""
-function diff_Aρ_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol)
-    d1 = 2 * diff_gamma(2H+1) * sin(π*H) * Cψρ_bspline(τ, ρ, H, v, mode)
-    d2 = gamma(2H+1) * cos(π*H) * π * Cψρ_bspline(τ, ρ, H, v, mode)
-    # d3 = gamma(2H+1) * sin(π*H) * ForwardDiff.derivative(H->Cψρ_bspline(τ, ρ, H, v, mode), H)
-    d3 = gamma(2H+1) * sin(π*H) * diff_Cψρ_bspline(τ, ρ, H, v, mode)
-    return d1 + d2 + d3
-end
-

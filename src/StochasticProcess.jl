@@ -1,170 +1,151 @@
 ########## Definitions of various stochastic process ##########
 
-"""
-Real Gaussian stochastic process.
-"""
-abstract type StochasticProcess{T<:TimeStyle}<:Sampleable{Univariate, Continuous} end
-
+abstract type AbstractRandomField end
+abstract type AbstractRealRandomField <: AbstractRandomField end
 
 """
-Process with integer time index (time-series).
+Generic zero-mean real-valued stochastic process.
 """
+abstract type StochasticProcess{T<:TimeStyle} <: AbstractRealRandomField end
+const ContinuousTimeStochasticProcess = StochasticProcess{ContinuousTime}
 const DiscreteTimeStochasticProcess = StochasticProcess{DiscreteTime}
 
-
-"""
-Process with real time index.
-"""
-const ContinuousTimeStochasticProcess = StochasticProcess{ContinuousTime}
-
-
-"""
-Stationary process.
-"""
-abstract type StationaryProcess{T}<:StochasticProcess{T} end
-
-const DiscreteTimeStationaryProcess = StationaryProcess{DiscreteTime}
+abstract type StationaryProcess{T} <: StochasticProcess{T} end
 const ContinuousTimeStationaryProcess = StationaryProcess{ContinuousTime}
+const DiscreteTimeStationaryProcess = StationaryProcess{DiscreteTime}
 
-
-"""
-Self-similar process.
-
-# Members
-- ss_exponent()
-"""
-abstract type SelfSimilarProcess<:ContinuousTimeStochasticProcess end
-
+abstract type SelfSimilarProcess <: ContinuousTimeStochasticProcess end
+abstract type SSSIProcess <: SelfSimilarProcess end  #
 
 """
-    ss_exponent(X::SelfSimilarProcess)
+Stationary process resulting from filtration (without DC) of another process.
 
+# Notes
+- The aimed concrete type of IncrementProcess is fGn which is stationary. However due to the lack of multiple inheritance in Julia it is very hard to make IncrementProcess a subtype of StationaryProcess. Possible solutions to this problem include 1) SimpleTrait.jl,  2) copy functions defined for StationaryProcess,  3) force FilterdProcess to be a subtype of StationaryProcess. We take the solution 3) here.
+"""
+abstract type FilteredProcess{T<:TimeStyle, P<:StochasticProcess{>:T}} <: StationaryProcess{T} end
+abstract type DifferentialProcess{T<:TimeStyle, P<:StochasticProcess{>:T}} <: FilteredProcess{T, P} end  # Process as first order finite difference of another process.
+abstract type IncrementProcess{P<:StochasticProcess} <: DifferentialProcess{DiscreteTime, P} end
+
+
+#### Process specific functions ####
+"""
 Return the self-similar exponent of the process.
 """
-ss_exponent(X::SelfSimilarProcess) = throw(NotImplementedError("ss_exponent(::$(typeof(X)))"))
+ss_exponent(X::SelfSimilarProcess) = throw(NotImplementedError())
+
+"""
+Return the filter of the process.
+"""
+filter(X::FilteredProcess) = throw(NotImplementedError())
+
+@doc raw"""
+Test whether the filtration is causal:
+\sum_{n=0}^{N-1} a[n] X(t-nδ)
+or anti-causal:
+\sum_{n=0}^{N-1} a[n] X(t+nδ)
+"""
+iscausal(X::FilteredProcess) = throw(NotImplementedError())
+
+"""
+Return the parent process of the filtered process.
+"""
+parent_process(X::FilteredProcess) = throw(NotImplementedError())
+
+"""
+Return the step of the filtered process.
+"""
+step(X::FilteredProcess) = throw(NotImplementedError())
+
+"""
+Return the gap of difference of the process.
+"""
+gap(X::DifferentialProcess) = throw(NotImplementedError())
+
+
+#### Generic identifiers ####
+"""
+Test whether a process is time discrete (a time series).
+"""
+ismultivariate(X::StochasticProcess) = false
+
+"""
+Test whether a process has stationary increments.
+"""
+isincrementstationary(X::StochasticProcess) = false
+isincrementstationary(X::StationaryProcess) = true
+isincrementstationary(X::SSSIProcess) = true
+
+"""
+Test whether a process is stationary.
+"""
+isstationary(X::StochasticProcess) = false
+isstationary(X::StationaryProcess) = true
+# isstationary(X::FilteredProcess{T, P}) where {T, P<:StationaryProcess} = true
+# isstationary(X::IncrementProcess{P}) where {P<:SSSIProcess} = true
 
 
 """
-Non-stationary process of increments.
+Determine whether a grid has the constant step.
 """
-abstract type NonStationaryIncrementProcess{T<:TimeStyle, P<:StochasticProcess}<:StochasticProcess{T} end
+function isregulargrid(G::AbstractVector)
+    return if length(G) == 2
+        true
+    elseif length(G) > 2
+        isapprox(maximum(abs.(diff(diff(G)))), 0.0; atol=1e-10)
+    else
+        false
+    end
+end
 
 
+
+#### Statistics for stochastic process ####
 """
-Stationary process of increments.
-"""
-abstract type StationaryIncrementProcess{T<:TimeStyle, P<:StochasticProcess}<:StationaryProcess{T} end
-
-
-"""
-Process of increments including both non-stationary and stationary cases.
-
-# Members
-- parent_process
-- step
-"""
-const IncrementProcess{T<:TimeStyle, P<:StochasticProcess} = Union{NonStationaryIncrementProcess{T, P}, StationaryIncrementProcess{T, P}}
-
-
-"""
-Self-similar process with stationary increments (SSSI).
-"""
-abstract type SSSIProcess<:SelfSimilarProcess end
-
-abstract type IncrementSSSIProcess{T<:TimeStyle, P<:SSSIProcess}<:StationaryIncrementProcess{T, P} end
-
-"""
-Process of increments of a SSSI process.
-"""
-abstract type IncrementSSSIProcess{T<:TimeStyle, P<:SSSIProcess}<:StationaryIncrementProcess{T, P} end
-
-const DiscreteTimeIncrementSSSIProcess{P<:SSSIProcess} = IncrementSSSIProcess{DiscreteTime, P}
-const ContinuousTimeIncrementSSSIProcess{P<:SSSIProcess} = IncrementSSSIProcess{ContinuousTime, P}
-
-
-"""
-    step(X::IncrementProcess)
-
-Return the step of increment of the process.
-"""
-step(X::IncrementProcess) = throw(NotImplementedError("step(::$(typeof(X)))"))
-
-
-"""
-    ss_exponent(X::IncrementSSSIProcess)
-
-Return the self-similar exponent of the parent process.
-"""
-ss_exponent(X::IncrementSSSIProcess) = throw(NotImplementedError("ss_exponent(::$(typeof(X)))"))
-
-
-"""
-    autocov(X::StochasticProcess{T}, i::T, j::T) where T
-
 Auto-covariance function of a stochastic process.
 """
-autocov(X::StochasticProcess{T}, i::T, j::T) where T = throw(NotImplementedError("autocov(::$(typeof(X)), ::$(T), ::$(T))"))
+autocov(X::StochasticProcess{T}, t::T, s::T) where T<:TimeStyle = throw(NotImplementedError())
+
+autocov(X::StationaryProcess{T}, t::T) where T<:TimeStyle = throw(NotImplementedError())
+autocov(X::StationaryProcess{T}, t::T, s::T) where T<:TimeStyle = autocov(X, t-s)
 
 
 """
-    autocov!(C::Matrix{Float64}, X::StochasticProcess, G::SamplingGrid)
-
 Compute the auto-covariance matrix of a stochastic process on a sampling grid.
 """
-function autocov!(C::Matrix{Float64}, X::StochasticProcess{T}, G::SamplingGrid{<:T}) where T
-    # check dimension
-    # @assert size(C, 1) == size(C, 2) == length(G)
-    # check grid
-    # @assert any(diff(G) .> 0)  # grid points must be strictly increasing
+function autocov!(C::Matrix{<:AbstractFloat}, X::StochasticProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle
+    @assert size(C, 1) == size(C, 2) == length(G)
 
     # construct the covariance matrix (a symmetric matrix)
     N = size(C, 1)  # dimension of the auto-covariance matrix
     for c = 1:N, r = 1:c
-        C[r,c] = autocov(X, G[c], G[r])
+        C[r,c] = autocov(X, G[r], G[c])
     end
     for c = 1:N, r = (c+1):N
         C[r,c] = C[c,r]
+    end
+    return Symmetric(C)
+end
+
+function autocov!(C::Matrix{<:AbstractFloat}, X::StochasticProcess{T}, G1::AbstractVector{<:T}, G2::AbstractVector{<:T}) where T<:TimeStyle
+    @assert size(C, 1) == length(G1) && size(C, 2) == length(G2)
+
+    # construct the covariance matrix (a symmetric matrix)
+    N,M = size(C)  # dimension of the auto-covariance matrix
+    for c = 1:M, r = 1:N
+        C[r,c] = autocov(X, G1[r], G2[c])
     end
     return C
 end
 
 
 """
-    autocov(X::StochasticProcess, G::SamplingGrid)
-
-Return the auto-covarince matrix of a stochastic process on a sampling grid.
-"""
-autocov(X::StochasticProcess{T}, G::SamplingGrid{<:T}) where T = autocov!(Matrix{Float64}(undef, length(G),length(G)), X, G)
-# autocov(X::StationaryProcess, G::SamplingGrid) = autocov!(Matrix{Float64}(length(G), length(G)), X, G)
-
-
-"""
-    covmat(X::StochasticProcess, G::SamplingGrid)
-
-Alias to `autocov(X::StochasticProcess, G::SamplingGrid)`.
-"""
-covmat(X::StochasticProcess{T}, G::SamplingGrid{<:T}) where T = autocov(X, G)
-
-covmat(X::DiscreteTimeStochasticProcess, N::Integer) = covmat(X, DiscreteTimeRegularGrid(1:N))
-
-
-"""
-    autocov(X::StationaryProcess, i::Real)
-
-Auto-covarince function of a stationary stochastic process.
-"""
-autocov(X::StationaryProcess{T}, i::T) where T = throw(NotImplementedError("autocov(::$(typeof(X)), ::Real)"))
-autocov(X::StationaryProcess{T}, i::T, j::T) where T = autocov(X, i-j)
-
-
-"""
-    autocov!(C::Vector{Float64}, X::StationaryProcess, G::RegularGrid)
-
 Compute the auto-covarince sequence of a stationary process on a regular grid.
 """
-function autocov!(C::Vector{Float64}, X::StationaryProcess{T}, G::RegularGrid{<:T}) where T
+function autocov!(C::AbstractVector{<:AbstractFloat}, X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle
     # check dimension
-    # @assert length(C) == length(G)
+    @assert length(C) == length(G)
+    @assert isregulargrid(G)
 
     # construct the auto-covariance kernel
     for n = 1:length(C)
@@ -179,12 +160,12 @@ end
 
 Return the auto-covariance sequence of a stationary process on a regular grid.
 """
-covseq(X::StationaryProcess{T}, G::RegularGrid{<:T}) where T = autocov!(zeros(length(G)), X, G)
+covseq(X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle = autocov!(zeros(length(G)), X, G)
 
 
-function autocov!(C::Matrix{Float64}, X::StationaryProcess{T}, G::RegularGrid{<:T}) where T
+function autocov!(C::Matrix{<:AbstractFloat}, X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle
     # check dimension
-    # @assert size(C, 1) == size(C, 2) == length(G)
+    @assert size(C, 1) == size(C, 2) == length(G)
 
     # construct the covariance matrix (a Toeplitz matrix)
     N = size(C, 1)
@@ -196,33 +177,30 @@ function autocov!(C::Matrix{Float64}, X::StationaryProcess{T}, G::RegularGrid{<:
 end
 
 
-# function autocov!(C::Matrix{Float64}, X::StationaryProcess, G::Vector{Float64})
-#     try
-#         idx = convert(Vector{Int64}, G)
-#         all(diff(idx) .== 1) || throw(InexactError("Failed to convert the irregular sampling grid."))
-#         return autocov!(C, X, idx[1]:idx[end])
-#     catch
-#         return invoke(autocov!, Tuple{Matrix{Float64}, StochasticProcess, SamplingGrid}, C, X, G)
-#     end
-# end
+"""
+Return the auto-covarince matrix of a stochastic process on a sampling grid.
+"""
+covmat(X::StochasticProcess, G::AbstractVector) = autocov!(zeros(length(G), length(G)), X, G)
+
+covmat(X::StochasticProcess, G1::AbstractVector, G2::AbstractVector) = autocov!(zeros(length(G1), length(G2)), X, G1, G2)
+
+covmat(X::StochasticProcess, N::Integer) = covmat(X, 1:N)
+covmat(X::StochasticProcess, N::Integer, M::Integer) = covmat(X, 1:N, 1:M)
 
 
 """
-    partcorr(X::DiscreteTimeStationaryProcess, n::DiscreteTime)
-
 Return the partial correlation function of a stationary process.
 """
-partcorr(X::DiscreteTimeStationaryProcess, n::DiscreteTime) = throw(NotImplementedError("partcorr(::$(typeof(X)), ::$(typeof(n)))"))
+partcorr(X::DiscreteTimeStationaryProcess, n::DiscreteTime) = throw(NotImplementedError())
 
 
 """
-    partcorr!(C::Vector{Float64}, X::DiscreteTimeStationaryProcess, G::DiscreteTimeRegularGrid)    
-
 Compute the partial correlation sequence of a stationary process for a range of index.
 """
-function partcorr!(C::Vector{Float64}, X::DiscreteTimeStationaryProcess, G::DiscreteTimeRegularGrid)
+function partcorr!(C::Vector{<:AbstractFloat}, X::DiscreteTimeStationaryProcess, G::AbstractVector{<:DiscreteTime})
     # check dimension
-    # @assert length(C) == length(G)
+    @assert length(C) == length(G)
+    @assert isregulargrid(G)
 
     for n = 1:length(C)
         C[n] = partcorr(X, G[n]-G[1]+1)
@@ -232,394 +210,67 @@ end
 
 
 """
-    partcorr(X::DiscreteTimeStationaryProcess, G::DiscreteTimeRegularGrid, ld::Bool=false)
-
 Return the partial correlation function of a stationary process for a range of index.
 If `ld==true` use the Levinson-Durbin method which needs only the autocovariance function of the process.
 """
-function partcorr(X::DiscreteTimeStationaryProcess, G::DiscreteTimeRegularGrid, ld::Bool=false)
+function partcorr(X::StationaryProcess, G::AbstractVector, ld::Bool=false)
     if ld  # use Levinson-Durbin
         cseq = covseq(X, G)
         pseq, sseq, rseq = LevinsonDurbin(cseq)
         return rseq
     else
-        return partcorr!(Vector{Float64}(length(G)), X, G)
+        return partcorr!(zeros(length(G)), X, G)
     end
 end
 
 
-"""
-    autocov(X::IncrementProcess{T, P}, t::T, s::T) where {T, P}
+# function autocov(X::FilteredProcess{T, P}, t::T, s::T) where {T<:TimeStyle, P<:StochasticProcess}
+#     proc = parent_process(X)
+#     δ = step(X)
 
-Return the auto-covariance function of a process of increments. The computation is done via the auto-covariance of the parent process.
-"""
-function autocov(X::IncrementProcess{T, P}, t::T, s::T) where {T, P}
-    proc = X.parent_process
-    δ = X.step
-
-    return autocov(proc, (t+δ), (s+δ)) - autocov(proc, (t+δ), (s)) - autocov(proc, (t), (s+δ)) + autocov(proc, (t), (s))
-end
-
-
-#### Fractional Brownian Motion ####
-"""
-Fractional Brownian motion.
-
-# Members
-* hurst: the Hurst exponent
-"""
-struct FractionalBrownianMotion<:SSSIProcess
-    hurst::Float64
-
-    function FractionalBrownianMotion(hurst::Float64)
-        0. < hurst < 1. || error("Hurst exponent must be bounded in 0 and 1.")
-        new(hurst)
-    end
-end
-
-ss_exponent(X::FractionalBrownianMotion) = X.hurst
-
-
-"""
-    autocov(X::FractionalBrownianMotion, t::ContinuousTime, s::ContinuousTime)
-
-Return the autocovariance function of fBm:
-    1/2 * (|t|^{2H} + |s|^{2H} - |t-s|^{2H})
-"""
-function autocov(X::FractionalBrownianMotion, t::ContinuousTime, s::ContinuousTime)
-    twoh::Float64 = 2*X.hurst
-    return 0.5 * (abs(t)^twoh + abs(s)^twoh - abs(t-s)^twoh)
-end
-
-
-# Moving average kernels of fBm
-"""
-K_+ kernel
-"""
-function Kplus(x::Real,t::Real,H::Real)
-    # @assert t>0
-    p::Float64 = H-1/2
-    v::Float64 = 0
-    if x<0
-        v = (t-x)^p - (-x)^p
-    elseif 0<=x<t
-        v = (t-x)^p
-    else
-        v = 0
-    end
-    return v
-end
-
-
-"""
-K_- kernel
-"""
-function Kminus(x::Real,t::Real,H::Real)
-    p::Float64 = H-1/2
-    v::Float64 = 0
-    if x<=0
-        v = 0
-    elseif 0<x<=t
-        v = -(x)^p
-    else
-        v = (x-t)^p - (x)^p
-    end
-    return v
-end
-
-
-"""
-K_+ + K_- kernel
-"""
-Kppm(x, t, H) = Kplus(x,t,H) + Kminus(x,t,H)
-
-
-"""
-K_+ - K_- kernel
-"""
-Kpmm(x, t, H) = Kplus(x,t,H) - Kminus(x,t,H)
-
-
-"""
-Fractional Gaussian noise.
-
-fGn is the (discrete-time) increment process of a fBm.
-"""
-struct FractionalGaussianNoise<:DiscreteTimeIncrementSSSIProcess{FractionalBrownianMotion}
-    parent_process::FractionalBrownianMotion
-    step::Float64
-
-    function FractionalGaussianNoise(hurst::Float64, step::Float64=1.)
-        step > 0 || error("Step must be > 0.")
-        new(FractionalBrownianMotion(hurst), step)
-    end
-end
-
-step(X::FractionalGaussianNoise) = X.step
-
-ss_exponent(X::FractionalGaussianNoise) = X.parent_process.hurst
-
-
-"""
-    autocov(X::FractionalGaussianNoise, l::DiscreteTime)
-
-Return the autocovariance function of fGn:
-    1/2 δ^{2H} (|i-j+1|^{2H} + |i-j-1|^2H - 2|i-j|^{2H})
-where δ is the step of increment.
-"""
-function autocov(X::FractionalGaussianNoise, l::DiscreteTime)
-    twoh::Float64 = 2*X.parent_process.hurst
-    return 0.5 * X.step^twoh * (abs(l+1)^twoh + abs(l-1)^twoh - 2*abs(l)^twoh)
-end
-
-
-# """
-# Fractional Wavelet noise.
-
-# fWn is the (discrete-time) process resulting from the filtering of a fBm by a wavelet.
-# """
-# struct FractionalWaveletNoise<:DiscreteTimeSSSIProcess{FractionalBrownianMotion}
-#     parent_process::FractionalBrownianMotion
-#     step::Float64
-
-#     function FractionalGaussianNoise(hurst::Float64, step::Float64=1.)
-#         step > 0 || error("Step must be > 0.")
-#         new(FractionalBrownianMotion(hurst), step)
-#     end
-# end
-
-# step(X::FractionalGaussianNoise) = X.step
-
-# ss_exponent(X::FractionalGaussianNoise) = X.parent_process.hurst
-
-
-# """
-#     autocov(X::FractionalGaussianNoise, l::DiscreteTime)
-
-# Return the autocovariance function of fGn:
-#     1/2 δ^{2H} (|i-j+1|^{2H} + |i-j-1|^2H - 2|i-j|^{2H})
-# where δ is the step of increment.
-# """
-# function autocov(X::FractionalGaussianNoise, l::DiscreteTime)
-#     twoh::Float64 = 2*X.parent_process.hurst
-#     return 0.5 * X.step^twoh * (abs(l+1)^twoh + abs(l-1)^twoh - 2*abs(l)^twoh)
+#     return autocov(proc, (t+δ), (s+δ)) - autocov(proc, (t+δ), (s)) - autocov(proc, (t), (s+δ)) + autocov(proc, (t), (s))
 # end
 
 
-#### Fractional Integrated Process ####
-"""
-Fractional integrated process.
+# """
+# Return the auto-covariance function of a process of increments. The computation is done via the auto-covariance of the parent process.
+# """
+# function autocov(X::IncrementProcess{P}, t::Integer, s::Integer) where P<:StochasticProcess
+#     proc = parent_process(X)
+#     δ = step(X)
 
-This is a stationary process defined by ∇^d X(t) = ε(t), where ∇^d, d in (-1/2, 1/2) is the fractional differential operator, and ε(t) are i.i.d. standard Gaussian variables.
-"""
-struct FractionalIntegrated<:DiscreteTimeStationaryProcess
-    d::Float64
-
-    function FractionalIntegrated(d::Float64)
-        abs(d) < 0.5 || error("Order of fractional differential must be in the range (-0.5, 0.5).")
-        # new(d, all(ar.==0) ? Float64[] : ar, all(ma.==0) ? Float64[] : ma)
-        new(d)
-    end
-end
-
-ss_exponent(X::FractionalIntegrated) = X.d + 1/2
-
-partcorr(X::FractionalIntegrated, k::DiscreteTime) = X.d/(k-X.d)
+#     return autocov(proc, (t+δ), (s+δ)) - autocov(proc, (t+δ), (s)) - autocov(proc, (t), (s+δ)) + autocov(proc, (t), (s))
+# end
 
 
-function autocov(X::FractionalIntegrated, n::DiscreteTime)
-    return n > 0 ? (n-1+X.d) / (n-X.d) * autocov(X, n-1) : gamma(1-2*X.d) / gamma(1-X.d)^2
-end
-
+#### Statistical inference on stochastic process ####
 
 """
-    autocov!(C::Vector{Float64}, X::FractionalIntegrated, G::DiscreteTimeRegularGrid)
-
-Note: The covariance of a fractional integrated process is computed recursively, so we overload `autocov!` for reason of efficiency.
+Conditional mean of a Gaussian process `P` on the position `Gx` given the value `Y` on the postion `Gy`.
 """
-function autocov!(C::Vector{Float64}, X::FractionalIntegrated, G::DiscreteTimeRegularGrid)
-    # check dimension
-    # @assert length(C) == length(G)
-
-    V = zeros(G[end])
-    V[1] = gamma(1-2*X.d) / gamma(1-X.d)^2  # cov(0)
-    for n = 1:length(V)-1
-        V[n+1] = V[n] * (n-1+X.d) / (n-X.d)
-    end
-    for n = 1:length(C)
-        C[n] = V[G[n]]
-    end
-    return C
-end
-
-
-#### FARIMA Process ####
-"""
-Fractional Auto-regression Integrated Moving Average (FARIMA) process.
-"""
-struct FARIMA<:DiscreteTimeStochasticProcess
-    d::Float64
-    ar::Vector{Float64}
-    ma::Vector{Float64}
-
-    FARIMA(d::Float64, ar::Vector{Float64}, ma::Vector{Float64}) = new(d, ar, ma)
-
-    # function FARIMA(d::Float64, ar::Vector{Float64}, ma::Vector{Float64})
-    #     # (typeof(P)==Int64 && P==length(ar)) || error("Inconsistent parameters for auto-regression.")
-    #     # (typeof(Q)==Int64 && Q==length(ma)) || error("Inconsistent parameters for moving average.")
-    #     # abs(d) < 0.5 || error("Order of fractional differential must be in the range (-0.5, 0.5).")
-    #     # new(d, all(ar.==0) ? Float64[] : ar, all(ma.==0) ? Float64[] : ma)
-    #     new(d, ar, ma)
-    # end
-end
-
-FARIMA(d::Float64) = FARIMA(d, Float64[], Float64[])
-
-# parameters(X::FARIMA{P,Q}) where {P,Q} = Dict('p'=>P, 'd'=>X.d, 'q'=>Q)
-# parameters(X::FARIMA{P,Q}) where {P,Q} = (P, X.d, Q)
-
-# FARIMA(d::Float64, ar::Vector{Float64}, ma::Vector{Float64}) = FARIMA{length(ar), length(ma)}(d, ar, ma)
-
-
-############################
-
-function fBm_covmat(G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, H::Real)
-    Σ = zeros(length(G1),length(G2))
-    for c=1:length(G2), r=1:length(G1)
-        Σ[r,c] = (abs(G1[r])^(2H) + abs(G2[c])^(2H) - abs(G1[r]-G2[c])^(2H))/2
-    end
-    return Σ
-end
-
-fBm_covmat(G::AbstractVector, H) = Matrix(Symmetric(fBm_covmat(G, G, H)))
-
-
-function fBm_cond_mean(Gx::AbstractVector{<:Real}, Gy::AbstractVector{<:Real}, Y::AbstractVector{<:Real}, H::Real)
+function cond_mean(P::StochasticProcess{T}, Gx::AbstractVector{T}, Gy::AbstractVector{T}, Y::AbstractVector{<:Real}) where T<:TimeStyle
     @assert length(Gy) == length(Y)
-    Σxy = fBm_covmat(Gx, Gy, H)
-    Σyy = fBm_covmat(Gy, Gy, H)
+    Σxy = covmat(P, Gx, Gy)
+    Σyy = covmat(P, Gy)
     return Σxy * (Σyy\Y)
 end
 
-
-function fBm_cond_mean(gx::Real, Gy::AbstractVector{<:Real}, Y::AbstractVector{<:Real}, H::Real)
-    return fBm_cond_mean([gx], Gy, Y, H)
-end
+cond_mean(P::StochasticProcess, gx::ContinuousTime, Gy::AbstractVector, Y::AbstractVector) = cond_mean(P, [gx], Gy, Y)
 
 
-function fBm_cond_cov(Gx::AbstractVector{<:Real}, Gy::AbstractVector{<:Real}, Y::AbstractVector{<:Real}, H::Real)
-    Σxx = fBm_covmat(Gx, Gx, H)
-    Σxy = fBm_covmat(Gx, Gy, H)
-    Σyy = fBm_covmat(Gy, Gy, H)
+"""
+Conditional covariance of a Gaussian process `P` on the position `Gx` given the value `Y` on the postion `Gy`.
+"""
+function cond_cov(P::StochasticProcess{T}, Gx::AbstractVector{T}, Gy::AbstractVector{T}, Y::AbstractVector{<:Real}) where T<:TimeStyle
+    @assert length(Gy) == length(Y)
+    Σxx = covmat(P, Gx)
+    Σxy = covmat(P, Gx, Gy)
+    Σyy = covmat(P, Gy)
     return Σxx - Σxy * inv(Σyy) * Σxy'
 end
 
+cond_cov(P::StochasticProcess, gx::ContinuousTime, Gy::AbstractVector, Y::AbstractVector) = cond_cov(P, [gx], Gy, Y)
 
-"""
-Compute the covariance matrix of a fWn at some time lag.
-
-# Args
-- F: array of band pass filters (no DC component)
-- d: time lag
-- H: Hurst exponent
-"""
-function fWn_covmat_lag(F::AbstractVector{<:AbstractVector{T}}, d::Int, H::Real) where {T<:Real}
-    L = maximum([length(f) for f in F])  # maximum length of filters
-    # M = [abs(d+(n-m))^(2H) for n=0:L-1, m=0:L-1]  # matrix comprehension is ~ 10x slower
-    M = zeros(L,L)
-    for n=1:L, m=1:L
-        M[n,m] = abs(d+(n-m))^(2H)
-    end
-    Σ = -1/2 * [f' * view(M, 1:length(f), 1:length(g)) * g for f in F, g in F]
-end
-
-
-"""
-Compute the covariance matrix of a time-concatenated fWn.
-"""
-function fWn_covmat(F::AbstractVector{<:AbstractVector{T}}, lmax::Int, H::Real) where {T<:Real}
-    J = length(F)
-    Σ = zeros(((lmax+1)*J, (lmax+1)*J))
-    Σs = [fWn_covmat_lag(F, d, H) for d = 0:lmax]
-
-    for r = 0:lmax
-        for c = 0:lmax
-            Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (c>=r) ? Σs[c-r+1] : transpose(Σs[r-c+1])
-        end
-    end
-
-    return Matrix(Symmetric(Σ))  #  forcing symmetry
-end
-
-
-
-# Auxiliary functions for the covariance of the  multifractional field
-_D(h1,h2) = (h1==h2) ? 1. : sqrt(gamma(2*h1+1)*sin(pi*h1)*gamma(2*h2+1)*sin(pi*h2)) / (gamma(h1+h2+1)*sin(pi*(h1+h2)/2))
-# or equivalently
-# _F(h) = lgamma(2h+1) + log(sin(π*h))
-# _D(h1,h2) = exp((_F(h1)+_F(h2))/2 - _F((h1+h2)/2))
-
-# h actually corresponds to 2h here:
-_gn(t,s,h) = (abs(t)^(h) + abs(s)^(h) - abs(t-s)^(h))/2  # non-stationary
-_gs(t,h) = (abs(t+1)^(h) + abs(t-1)^(h) - 2*abs(t)^(h))/2  # stationary
-
-
-"""
-Covariance of multifractional Brownian motion.
-"""
-function mBm_cov(t1::Real, t2::Real, h1::Real, h2::Real)
-    _D(h1, h2) * _gn(t1, t2, h1+h2)
-end
-
-
-function mBm_covmat(G1::AbstractVector{<:Real}, H1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, H2::AbstractVector{<:Real})
-    @assert length(G1) == length(H1)
-    @assert all(0 .< H1 .< 1)
-    @assert length(G2) == length(H2)
-    @assert all(0 .< H2 .< 1)
-
-    N1, N2 = length(G1), length(G2)
-    Σ = zeros(N1,N2)
-    
-    for c=1:N2, r=1:N1
-        Σ[r,c] = mBm_cov(G1[r], G2[c], H1[r], H2[c])
-    end
-    return Σ
-end
-
-mBm_covmat(G::AbstractVector{<:Real}, H::AbstractVector{<:Real}) = mBm_covmat(G, H, G, H)
-
-mBm_covmat(G::AbstractVector{<:Real}, H::Real) = mBm_covmat(G, H)
-
-
-
-
-"""
-(Approximate) Covariance of multifractional Gaussian noise.
-"""
-function mGn_cov(t1::Real, t2::Real, h1::Real, h2::Real)
-    _D(h1, h2) * _gs(t1-t2, h1+h2)
-end
-
-
-function mGn_covmat(G1::AbstractVector{<:Real}, H1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, H2::AbstractVector{<:Real})
-    @assert length(G1) == length(H1)
-    @assert all(0 .< H1 .< 1)
-    @assert length(G2) == length(H2)
-    @assert all(0 .< H2 .< 1)
-
-    N1, N2 = length(G1), length(G2)
-    Σ = zeros(N1,N2)
-    
-    for c=1:N2, r=1:N1
-        Σ[r,c] = mGn_cov(G1[r], G2[c], H1[r], H2[c])
-    end
-    return Σ
-end
-
-
-mGn_covmat(G::AbstractVector{<:Real}, H::AbstractVector{<:Real}) = mGn_covmat(G, H, G, H)
-
-mGn_covmat(G::AbstractVector{<:Real}, H::Real) = mGn_covmat(G, H)
-
-
+include("FBM.jl")
+include("MFBM.jl")
+include("FARIMA.jl")

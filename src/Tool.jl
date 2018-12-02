@@ -19,7 +19,7 @@ function rolling_apply_hard(func::Function, X0::AbstractVecOrMat{T}, s::Int, d::
     # @assert s>0
     X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
     L = size(X,2)
-    return if mode==:causal            
+    return if mode==:causal
         hcat(reverse([func(X[:,t-s+1:t]) for t=L:-d:s])...)
     else  # anti-causal
         hcat([func(X[:,t:t+s-1]) for t=1:d:L-s+1]...)
@@ -33,7 +33,7 @@ function rolling_apply_soft(func::Function, X0::AbstractVecOrMat{T}, s::Int, d::
     # @assert s>0
     X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
     L = size(X,2)
-    return if mode==:causal            
+    return if mode==:causal
         hcat(reverse([func(X[:,max(1,t-s+1):t]) for t=L:-d:1])...)
     else  # anti-causal
         hcat([func(X[:,t:min(L,t+s-1)]) for t=1:d:L]...)
@@ -63,7 +63,7 @@ function shrinkage_by_value(X0::AbstractArray{T}, v::T, mode::Symbol=:soft) wher
     idx = findall(abs.(X0) .> v)
     if mode == :soft
         X1[idx] .= sign.(X0[idx]) .* (abs.(X0[idx]) .- v)
-    else 
+    else
         X1[idx] .= X0[idx]
     end
     return X1
@@ -71,11 +71,11 @@ end
 
 function shrinkage_by_number(X0::AbstractArray{T}, n::Int, mode::Symbol=:soft) where {T<:Number}
     Xv = ndims(X0)>1 ? vec(X0) : X0
-    X1 = fill(zero(T), length(Xv))  # or zero(X0)    
-    idx = sortperm(abs.(Xv))[end-n+1:end]  # increasing order        
+    X1 = fill(zero(T), length(Xv))  # or zero(X0)
+    idx = sortperm(abs.(Xv))[end-n+1:end]  # increasing order
     if mode == :soft
         X1[idx] .= sign.(Xv[idx]) .* (abs.(Xv[idx]) .- Xv[idx[1]])
-    else 
+    else
         X1[idx] .= Xv[idx]
     end
     return reshape(X1, size(X0))
@@ -148,21 +148,6 @@ function norm(X::AbstractMatrix{T}, p::Real=2; dims::Int=1) where {T<:Number}
 end
 
 
-function pinv_iter(A::AbstractMatrix{T}, method::Symbol=:lsqr) where {T<:Number}
-    iA = zeros(Float64, size(A'))
-    try
-        iA = pinv(A)
-    catch
-        for c = 1:size(iA, 2)
-            b = zeros(Float64, size(A,1))
-            b[c] = 1.
-            iA[:,c] = IterativeSolvers.lsqr(A, b)
-        end
-    end
-    return iA
-end
-
-
 """
 Compute A^-1 * B using the lsqr iterative method.
 """
@@ -175,9 +160,8 @@ function lsqr(A::AbstractMatrix{T}, B::AbstractMatrix{T}; kwargs...) where {T<:R
     return X
 end
 
-"""
-    LevinsonDurbin(cseq::Vector{Float64})
 
+"""
 Diagonalization of a symmetric positive definite Toeplitz matrix using Levinson-Durbin (LD) method by providing `cseq`,
 the covariance sequence of a stationary process.
 
@@ -189,7 +173,7 @@ the covariance sequence of a stationary process.
 # Explanation
 `pseq` forms the lower triangular matrix diagonalizing the covariance matrix Γ, and `sseq` forms the resulting diagonal matrix. `rseq[n]` is just `pseq[n][n]`.
 """
-function LevinsonDurbin(cseq::AbstractVector{T}) where {T<:Real}
+function LevinsonDurbin(cseq::AbstractVector{<:Real})
     N = length(cseq)
 
     if N > 1
@@ -222,7 +206,7 @@ function LevinsonDurbin(cseq::AbstractVector{T}) where {T<:Real}
     return pseq, sseq, rseq
 end
 
-LevinsonDurbin(p::StationaryProcess{T}, g::RegularGrid{<:T}) where T = LevinsonDurbin(covseq(p, g))
+LevinsonDurbin(p::StationaryProcess{T}, g::AbstractVector{<:T}) where T<:TimeStyle = LevinsonDurbin(covseq(p, g))
 
 
 """
@@ -267,7 +251,7 @@ row_normalize!(A) = col_normalize!(transpose(A))
 """
 Compute d-lag finite difference of a vector.
 """
-function lagdiff(X::AbstractVector{<:Real}, d::Int, mode::Symbol=:causal) 
+function lagdiff(X::AbstractVector{<:Real}, d::Int, mode::Symbol=:causal)
     dX = fill(NaN, length(X))
     dX[d+1:end] = X[d+1:end]-X[1:end-d]
     return (mode==:causal) ? dX : circshift(dX, -d)
@@ -340,11 +324,11 @@ function _window_timearray(A::TimeArray, tstp::AbstractVector{<:Dates.AbstractTi
         cnames = TimeSeries.colnames(A)
         vstp = intersect(tstp, TimeSeries.timestamp(A))  # valid timestamps
         sidx = map(t->findall(isequal(t), tstp)[1], vstp)  # relative index of valid timestamp
-        # shape = (ndims(TimeSeries.values(A)) == 1) ? (length(tstp),) : (length(tstp),length(cnames)) 
-        
+        # shape = (ndims(TimeSeries.values(A)) == 1) ? (length(tstp),) : (length(tstp),length(cnames))
+
         x = fill(NaN, (length(tstp),length(cnames)))
         x[sidx,:] = TimeSeries.values(A[vstp])
-        
+
         xf = if fillmode == :n
             x
         elseif fillmode==:f
@@ -358,7 +342,7 @@ function _window_timearray(A::TimeArray, tstp::AbstractVector{<:Dates.AbstractTi
         else
             error("Unknown symbol: $(fill)")
         end
-        
+
         return TimeArray(tstp, (ndims(TimeSeries.values(A))==1) ? vec(xf) : xf, cnames)
     end
 end
@@ -368,7 +352,7 @@ end
 function split_by_day(data::TimeArray)
     res = []
     d0, d1 = Dates.Date(TimeSeries.timestamp(data[1])[1]), Dates.Date(TimeSeries.timestamp(data[end])[1])
-    
+
     for d in d0:Dates.Day(1):d1
         m0 = Dates.DateTime(d)
         m1 = Dates.DateTime(d + Dates.Hour(23) + Dates.Minute(59))

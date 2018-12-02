@@ -1,7 +1,5 @@
 ########## Collection of obseleted codes ##########
 
-
-
 # function rolling_estim(func::Function, X::AbstractMatrix{T}, widx::AbstractArray{Int}, p::Int) where {T<:Real}
 #     # wsize = w[end]-w[1]+1
 #     # @assert wsize <= size(X,2)
