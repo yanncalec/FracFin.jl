@@ -1,5 +1,19 @@
 ########## Computational Harmonic Analysis and Wavelet transform ##########
 
+function native_conv(u::AbstractArray{U,1}, v::AbstractArray{V,1}) where {U<:Number, V<:Number}
+    m = length(u)
+    n = length(v)
+    w = zeros(promote_type(U,V), m+n-1)
+
+    @inbounds begin
+        for j=1:m, k=1:n
+            w[j+k-1] += u[j] * v[k]
+        end
+    end
+    return w
+end
+
+
 # Normalizations of Wavelets.jl for different families are not coherent:
 # Assuming the sqrt(2) factor in the cascade algorithm (see wavefun), then the filters of the following
 # family have to be rescaled by the corresponding factor

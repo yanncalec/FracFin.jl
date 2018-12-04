@@ -10,8 +10,8 @@ Cholesky sampler for general Gaussian process.
 struct CholeskySampler{T, P, G} <: Sampler{T, P, G}
     proc::P  # instance of the stochastic process
     grid::G  # grid in use for sampling
-    cmat::Matrix{AbstractFloat}  # covariance matrix
-    lmat::Matrix{AbstractFloat}  # lower-triangular matrix: lmat * lmat' = cmat
+    cmat::AbstractMatrix  # covariance matrix
+    lmat::AbstractMatrix  # lower-triangular matrix: lmat * lmat' = cmat
 
     function CholeskySampler{T, P, G}(p::P, g::G) where {T, P, G}
         # check the grid for fBM
@@ -19,8 +19,8 @@ struct CholeskySampler{T, P, G} <: Sampler{T, P, G}
             error("The sampling grid must not contain the origin.")
         end
         # construct the auto-covariance matrix
-        cmat = autocov(p, g)
-        lmat = (cholesky(cmat)).U'  # cholesky decomposition yields an upper-triangular matrix
+        cmat = covmat(p, g)
+        lmat = cholesky(cmat).U'  # cholesky decomposition yields an upper-triangular matrix
         return new(p, g, cmat, lmat)
     end
 end
@@ -44,11 +44,11 @@ Circulant embedding sampler for stationary Gaussian process.
 struct CircSampler{T, P<:StationaryProcess{T}, G<:AbstractVector{<:T}} <: Sampler{T, P, G}
     proc::P  # instance of the stochastic process
     grid::G  # grid in use for sampling
-    cseq::Vector{AbstractFloat}  # covariance sequence
-    fseq::Vector{AbstractFloat}  # square-root of the Fourier coefficients of cseq
+    cseq::AbstractVector  # covariance sequence
+    fseq::AbstractVector  # square-root of the Fourier coefficients of cseq
 
     function CircSampler{T, P, G}(p::P, g::G) where {T, P, G}
-        @assert isregulargrid(G)  # only works on regular (continuous or discrete) grid
+        @assert isregulargrid(g)  # only works on regular (continuous or discrete) grid
 
         # Nf = 1 << ceil(Integer, log2(length(p)))  # length of FFT, equivalent to 2^()
         c = covseq(p, g)
@@ -60,7 +60,7 @@ struct CircSampler{T, P<:StationaryProcess{T}, G<:AbstractVector{<:T}} <: Sample
         cf = real(fft(cm))  # the imaginary part is close to zero
         # check the non-negative constraint
         idx = cf .< 0.
-        any(idx) && warn("Negative eigenvalues encountered, using Wood-Chan approximation.")
+        any(idx) && @warn("Negative eigenvalues encountered, using Wood-Chan approximation.")
         cf[idx] .= 0.
         new(p, g, c, sqrt.(cf))
     end
@@ -101,7 +101,7 @@ end
 
 #### Hosking ####
 """
-Hosking (Levinson-Durbin) sampler for staionary Gaussian process.
+Hosking (Levinson-Durbin) sampler for stationary Gaussian process.
 
 # Notes
 * This method draws the sample trajectory on any sampling grid adapted to the underlying process.
@@ -109,23 +109,16 @@ Hosking (Levinson-Durbin) sampler for staionary Gaussian process.
 struct HoskingSampler{T, P<:StationaryProcess{T}, G<:AbstractVector{<:T}} <: Sampler{T, P, G}
     proc::P  # instance of the stochastic process
     grid::G  # grid in use for sampling
-    cseq::Vector{<:AbstractFloat}  # covariance sequence
-    rseq::Vector{<:AbstractFloat}  # sequence of partial correlation
-    pseq::Vector{Vector{<:AbstractFloat}}  # the coefficients of consecutive projections
-    sseq::Vector{<:AbstractFloat}  # sequence of variance of residual of projections
+    cseq::AbstractVector  # covariance sequence
+    rseq::AbstractVector  # sequence of partial correlation
+    pseq::AbstractVector{<:AbstractVector}  # the coefficients of consecutive projections
+    sseq::AbstractVector  # sequence of variance of residual of projections
     # pmat::SparseMatrixCSC{AbstractFloat}  # upper triangular matrix diagonalizing the covariance matrix
     # cmat::Matrix{<:AbstractFloat}  # matrix of covariance
 
     function HoskingSampler{T, P, G}(p::P, g::G) where {T, P, G}
-        @assert isregulargrid(G)  # only works on regular (continuous or discrete) grid
+        @assert isregulargrid(g)  # only works on regular (continuous or discrete) grid
 
-        # cseq =
-        #     try
-        #         cseq = covseq(p, g)
-        #     catch msg  # method autocov!() not defined for the given process
-        #         warn(msg)
-        #         Float64[]
-        #     end
         cseq = covseq(p, g)
         pseq, sseq, rseq = LevinsonDurbin(cseq)
 
@@ -134,7 +127,7 @@ struct HoskingSampler{T, P<:StationaryProcess{T}, G<:AbstractVector{<:T}} <: Sam
         # for c = 2:N
         #     pmat[1:c-1, c] = -pseq[c-1][end:-1:1]
         # end
-        # cmat = autocov(p, g)
+        # cmat = covmat(p, g)
         return new(p, g, cseq, rseq, pseq, sseq) #, pmat, cmat)
     end
 end
@@ -243,16 +236,16 @@ struct CRMDSampler{P<:IncrementProcess} <: DiscreteTimeSampler{P}
     proc::P  # instance of the stochastic process
     grid::DiscreteTimeGrid  # grid in use for sampling
     jmin::Integer  # coarse scale index
-    coarse_sampler::DiscreteTimeSampler  # exact sampler for the coarse scale
+    coarse_sampler::Sampler  # exact sampler for the coarse scale
 
     # sclrng::RegularGrid  # range of dyadic scales jmin..jmax
     wsize::Integer  # window size for the conditionalized sampling
-    init_coef::Matrix{<:AbstractFloat}  # coefficients of the initial sampler
-    init_lmat::Matrix{<:AbstractFloat}  # lower triangular matrix of the initial sampler
-    rfn_coef::Vector{<:AbstractFloat}  # coefficients of the refinement sampler
+    init_coef::AbstractMatrix  # coefficients of the initial sampler
+    init_lmat::AbstractMatrix  # lower triangular matrix of the initial sampler
+    rfn_coef::AbstractVector  # coefficients of the refinement sampler
     rfn_std::AbstractFloat  # square-root of variance of the refinement (scale independant)
-    # cmat::Matrix{<:AbstractFloat}  # system matrix of the refinement sampler
-    # cvec::Vector{<:AbstractFloat}  # RHS vector of the refinement sampler
+    # cmat::AbstractMatrix  # system matrix of the refinement sampler
+    # cvec::AbstractVector  # RHS vector of the refinement sampler
     # init_pos::Symbol  # window position of initial samples, :left, :right, :center
 
     """
@@ -269,7 +262,7 @@ struct CRMDSampler{P<:IncrementProcess} <: DiscreteTimeSampler{P}
     - the grid `g` is used only at the end: the generated trajectory with unit step is restricted on `g` to obtain the (down-sampled) trajectory of desired length.
     """
     function CRMDSampler{P}(p::P, g::DiscreteTimeGrid, w::Integer, jmin::Integer) where {P}
-        @assert isregulargrid(G)  # only works on regular (continuous or discrete) grid
+        @assert isregulargrid(g)  # only works on regular (continuous or discrete) grid
 
         step(p) == 1 || error("Step of increment of the underlying process must be 1.")
         @assert 1 <= w <= 2^jmin
@@ -290,8 +283,8 @@ struct CRMDSampler{P<:IncrementProcess} <: DiscreteTimeSampler{P}
         # initial sampler
         Ah = Af[1:w, 1:w] # [autocov(p, 2*(l-m)) + autocov(p, 2*(l-m)+1) for l=0:w-1, m=0:w-1]
         ξ = (2^(2*H) * Ch) \ Ah
-        M = full(Symmetric(Cd - ξ' * Ah))  # reinforce symmetry
-        L = full(chol(M)')
+        M = Symmetric(Cd - ξ' * Ah)  # reinforce symmetry
+        L = cholesky(M).U'
 
         # system matrix
         b11 = 2^(2*H) * Cf
@@ -370,12 +363,12 @@ Wavelet sampler for fractional integrated (fIt) process with d ∈ (-1/2, 1/2).
 struct WaveletSampler <: DiscreteTimeSampler{FractionalIntegrated}
     proc::FractionalIntegrated  # instance of the stochastic process
     grid::DiscreteTimeGrid  # grid in use for sampling
-    coarse_sampler::DiscreteTimeSampler  # exact sampler for the coarse scale
+    coarse_sampler::Sampler  # exact sampler for the coarse scale
     psflag::Bool  # flag of partial sum
     jmin::Integer  # coarse scale index
-    qmf_ori::Tuple{Vector{<:AbstractFloat}, Vector{<:AbstractFloat}}  # original qmf filter (lo, hi)
-    # qmf_mod::Tuple{Vector{<:AbstractFloat}, Vector{<:AbstractFloat}}  # modified qmf filter (lo, hi)
-    qmf_fra::Tuple{Vector{<:AbstractFloat}, Vector{<:AbstractFloat}}  # fractionnal qmf filter  (lo, hi)
+    qmf_ori::Tuple{AbstractVector, AbstractVector}  # original qmf filter (lo, hi)
+    # qmf_mod::Tuple{AbstractVector, AbstractVector}  # modified qmf filter (lo, hi)
+    qmf_fra::Tuple{AbstractVector, AbstractVector}  # fractionnal qmf filter  (lo, hi)
 
     """
     Constructor of WaveletSampler.
@@ -385,15 +378,19 @@ struct WaveletSampler <: DiscreteTimeSampler{FractionalIntegrated}
     - r: regularity of the wavelet function, must be strictly larger than s=H+1/2
     - psflag: if true generate a trajectory of FARIMA(0, H+1/2, 0), otherwise generate FARIMA(0, H-1/2, 0).
     """
-    function WaveletSampler(p::FractionalIntegrated, g::DiscreteTimeGrid; r=5, jmin=10, max_len=40, psflag=true)
-        @assert isregulargrid(G)  # only works on regular (continuous or discrete) grid
+    function WaveletSampler(p::FractionalIntegrated, g::DiscreteTimeGrid; r=5, jmin=10, psflag=true)
+        @assert isregulargrid(g)  # only works on regular (continuous or discrete) grid
 
         # jmin = 10  # coarse scale index
         trunc_eps = 1e-8  # precision of truncation
         H = p.d + 1/2  # Hurst exponent
-        s = H + 1/2; d = H - 1/2
-        r > s || error("Regularity of the wavelet must be larger than H+1/2!")
-        v = psflag ? s : d  # fractional exponent for H+1/2 or H-1/2
+
+        r > H+1/2 || error("Regularity of the wavelet must be larger than H+1/2!")
+        v = psflag ? H+1/2 : H-1/2  # fractional exponent for H+1/2 or H-1/2
+
+        # s = H + 1/2; d = H - 1/2   #  or simply: s = p.d + 1; d = p.d
+        # r > s || error("Regularity of the wavelet must be larger than H+1/2!")
+        # v = psflag ? s : d  # fractional exponent for H+1/2 or H-1/2
 
         # original qmf filters
         lo_ori = Wavelets.WT.daubechies(2*r)
@@ -412,10 +409,10 @@ struct WaveletSampler <: DiscreteTimeSampler{FractionalIntegrated}
         f0 = [binomial(v+r, k) for k in 0:lmax]
         g0 = [(-1)^k * binomial(r-v, k) for k in 0:lmax]
         lt = max(sum(abs.(f0).>trunc_eps), sum(abs.(g0).>trunc_eps))
-        lo_fra = conv(f0[1:lt], lo_mod)[1:max_len]
-        hi_fra = conv(g0[1:lt], hi_mod)[1:max_len]
+        lo_fra = conv(f0[1:lt], lo_mod)
+        hi_fra = conv(g0[1:lt], hi_mod)
 
-        coarse_sampler = CholeskySampler(p, DiscreteTimeRegularGrid(1:2^jmin))
+        coarse_sampler = CholeskySampler(p, 1:2^jmin)
         return new(p, g, coarse_sampler, psflag, jmin, (lo_ori, hi_ori), (lo_fra, hi_fra))
     end
 end
@@ -463,8 +460,8 @@ function rand!(x::Vector{<:AbstractFloat}, s::WaveletSampler)
 
     Ng = s.grid[end]-s.grid[1]  # full range of grid
     # keep only the central part and force to start from 0
-    n = max(Int(round((length(x0)-Ng)/2)), 1)
-    x1 = x0[n:(n+Ng)] - x0[n]
+    n = max((length(x0)-Ng)÷2, 1)
+    x1 = x0[n:(n+Ng)] .- x0[n]
     return copyto!(x, x1[s.grid][1:length(x)])
 end
 

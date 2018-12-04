@@ -47,6 +47,8 @@ const pywt = PyCall.PyNULL()
 struct NotImplementedError <: Exception
     errmsg::AbstractString
     # errpos::Int64
+
+    NotImplementedError() = new("")
 end
 show(io::IO, exc::NotImplementedError) = print(io, string("NotImplementedError:\n",exc.errmsg))
 

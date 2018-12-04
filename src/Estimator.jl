@@ -26,7 +26,7 @@ function powlaw_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, p::Real=2
 
     yp = map(d -> log(moment_incr(X, d, p)), lags)
     xp = p * log.(lags)
-    
+
     # estimation of H and β
     # by manual inversion
     # Ap = hcat(xp, ones(length(xp))) # design matrix
@@ -63,13 +63,13 @@ function bspline_scalogram_estim(S::AbstractVector{T}, sclrng::AbstractVector{In
     # hurst::Float64 = res[1][1]-1/2
     # β::Float64 = res[1][2][1]  # returned value is a scalar in a vector form
     # ols::Float64 = NaN
-    
+
     df = DataFrames.DataFrame(xvar=log.(sclrng.^p), yvar=log.(S))
     ols = GLM.lm(@GLM.formula(yvar~xvar), df)
     coef = GLM.coef(ols)
     β::Float64 = coef[1]
     hurst::Float64 = coef[2]-1/2
-    
+
     σ::Float64 = try
         Aρ = Aρ_bspline(0, 1, hurst, v, mode)
         exp((β - log(C) - log(abs(Aρ))*p/2)/p)
@@ -148,8 +148,8 @@ function gen_bspline_scalogram_estim(Σ::AbstractMatrix{T}, sclrng::AbstractVect
 end
 const fBm_gen_bspline_scalogram_estim = gen_bspline_scalogram_estim
 
-###### MLE ######
 
+###### MLE ######
 
 """
 Safe evaluation of the inverse quadratic form
@@ -216,15 +216,13 @@ end
 #### fWn-MLE ####
 # A fWn is the filtration of a fBm time series by a bank of high pass filters, eg, multiscale wavelet filters.
 
-
-
 """
 H-dependent log-likelihood of fraction wavelet noise (fWn) with optimal σ.
 """
 function fWn_log_likelihood_H(X::AbstractVecOrMat{T}, F::AbstractVector{<:AbstractVector{T}}, H::Real) where {T<:Real}
     @assert 0 < H < 1
     @assert size(X,1) % length(F) == 0
-    
+
     Σ = Matrix(Symmetric(fWn_covmat(F, size(X,1)÷length(F)-1, H)))
     return log_likelihood_H(Σ, X)
 end
@@ -263,17 +261,17 @@ function fWn_MLE_estim(X::AbstractVecOrMat{T}, F::AbstractVector{<:AbstractVecto
         # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
         # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
         hurst = Optim.minimizer(opm)[1]
-    elseif method == :table    
-        Hs = collect(ε:ε:1-ε)        
+    elseif method == :table
+        Hs = collect(ε:ε:1-ε)
         hurst = Hs[argmin([func(h) for h in Hs])]
     else
         throw("Unknown method: ", method)
     end
-    
+
     Σ = Matrix(Symmetric(fWn_covmat(F, size(X,1)÷length(F)-1, hurst)))
     σ = sqrt(xiAx(Σ, X) / length(X))
     L = log_likelihood_H(Σ, X)
-    
+
     return (hurst, σ), L, opm
 end
 
@@ -305,26 +303,8 @@ end
 #### fGn-MLE ####
 # A special case of fWn-MLE which deserves it own implementation.
 
-"""
-Construct the covariance matrix of a stationary process from the covariance sequence.
-"""
-function covmat(S::AbstractVector{T}) where {T<:Real}
-    [S[abs(n-m)+1] for n=1:length(S), m=1:length(S)]
-end
-
-function fGn_covfunc(H::Real, n::Int, d::Int)
-    return 1/2 * (abs(n+d)^(2H) + abs(n-d)^(2H) - 2*abs(n)^(2H))
-end
-
-fGn_covseq(H::Real, lags::AbstractVector{Int}, d::Int) where {T<:Real} = [fGn_covfunc(H,n,d) for n in lags]
-                               
-fGn_covmat(H::Real, N::Int, d::Int) = covmat(fGn_covseq(H, 0:N-1, d))
-
 function fGn_log_likelihood_H(X::AbstractVecOrMat{T}, H::Real, d::Int) where {T<:Real}
-    @assert 0 < H < 1
-
-    # Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(H, 1.), size(X,1))))
-    Σ = Matrix(Symmetric(fGn_covmat(H, size(X,1), d)))
+    Σ = covmat(FractionalGaussianNoise(H, d), size(X,1))
     return log_likelihood_H(Σ, X)
 end
 
@@ -354,13 +334,13 @@ function fGn_MLE_estim(X::AbstractVecOrMat{T}, d::Int; method::Symbol=:optim, ε
         # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
         # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
         hurst = Optim.minimizer(opm)[1]
-    elseif method == :table    
-        Hs = collect(ε:ε:1-ε)        
+    elseif method == :table
+        Hs = collect(ε:ε:1-ε)
         hurst = Hs[argmin([func(h) for h in Hs])]
     else
         throw("Unknown method: ", method)
     end
-    
+
     # Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(hurst, 1.), size(X,1))))
     Σ = Matrix(Symmetric(fGn_covmat(hurst, size(X,1), d)))
     σ = sqrt(xiAx(Σ, X) / length(X))
@@ -379,9 +359,9 @@ function ms_fGn_MLE_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, w::In
 
     for (n,lag) in enumerate(lags)  # time lag for finite difference
         # vectorization with window size w
-        dXo = rolling_vectorize(X[lag+1:end]-X[1:end-lag], w, 1)  
+        dXo = rolling_vectorize(X[lag+1:end]-X[1:end-lag], w, 1)
         # rolling mean with window size 2lag, then down-sample at step lag
-        dX = rolling_mean(dXo, 2lag, lag; boundary=:hard)  
+        dX = rolling_mean(dXo, 2lag, lag; boundary=:hard)
 
         (hurst_estim, σ_estim), obj = fGn_MLE_estim(squeezedims(dX), lag)
 
@@ -413,7 +393,7 @@ The full covariance matrix of `J`-scale transform and of time-lag `N` is a N*J-b
 - H: Hurst exponent
 - mode: mode of convolution
 """
-function fBm_bspline_covmat(l::Int, sclrng::AbstractVector{Int}, v::Int, H::Real, mode::Symbol)    
+function fBm_bspline_covmat(l::Int, sclrng::AbstractVector{Int}, v::Int, H::Real, mode::Symbol)
     J = length(sclrng)
     Σ = zeros(((l+1)*J, (l+1)*J))
     Σs = [fBm_bspline_covmat_lag(H, v, d, sclrng, mode) for d = 0:l]
@@ -457,7 +437,7 @@ function fBm_bspline_DCWT_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVect
     # number of wavelet coefficient vectors concatenated into one column of X
     L = size(X,1) ÷ length(sclrng)  # integer division: \div
     # N = ndims(X)>1 ? size(X,2) : 1
-    
+
     func = x -> -fBm_bspline_log_likelihood_H(X, sclrng, v, x, mode)
 
     opm = nothing
@@ -470,13 +450,13 @@ function fBm_bspline_DCWT_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVect
         # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
         # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
         hurst = Optim.minimizer(opm)[1]
-    elseif method == :table    
-        Hs = collect(ε:ε:1-ε)        
+    elseif method == :table
+        Hs = collect(ε:ε:1-ε)
         hurst = Hs[argmin([func(h) for h in Hs])]
     else
         throw("Unknown method: ", method)
     end
-    
+
     Σ = fBm_bspline_covmat(L-1, sclrng, v, hurst, mode)
     σ = sqrt(xiAx(Σ, X) / length(X))
 

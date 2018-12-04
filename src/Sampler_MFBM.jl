@@ -103,6 +103,7 @@ function linprd_SfGn(Hgrid::Vector{<:AbstractFloat}, N::Integer, epsilon=1e-8)
     return J, Ψ, Φ, R, C
 end
 
+
 """
 Conditional sampling of a sequence of fGn
 """
@@ -148,7 +149,7 @@ end
 """
 Conditionalized sampling of a sequence of fGn (SfGn).
 """
-struct SfGnSampler<:DiscreteTimeSampler{FractionalGaussianNoise}
+struct SfGnSampler <: DiscreteTimeSampler{FractionalGaussianNoise}
     Hurst::Vector{<:AbstractFloat}
     grid::DiscreteTimeGrid  # grid in use for sampling
     hgrid::Vector{<:AbstractFloat}  # grid for Hurst exponents

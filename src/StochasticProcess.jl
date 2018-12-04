@@ -17,14 +17,28 @@ const DiscreteTimeStationaryProcess = StationaryProcess{DiscreteTime}
 abstract type SelfSimilarProcess <: ContinuousTimeStochasticProcess end
 abstract type SSSIProcess <: SelfSimilarProcess end  #
 
-"""
+@doc raw"""
 Stationary process resulting from filtration (without DC) of another process.
 
-# Notes
+It is defined as, causal version:
+\sum_{n=0}^{N-1} a[n+1] X(t-nδ)
+anti-causal version:
+\sum_{n=0}^{N-1} a[n+1] X(t+nδ)
+
+# Note
+- Under the stationarity assumption the causality has no effect on the auto-covariance function.
 - The aimed concrete type of IncrementProcess is fGn which is stationary. However due to the lack of multiple inheritance in Julia it is very hard to make IncrementProcess a subtype of StationaryProcess. Possible solutions to this problem include 1) SimpleTrait.jl,  2) copy functions defined for StationaryProcess,  3) force FilterdProcess to be a subtype of StationaryProcess. We take the solution 3) here.
 """
 abstract type FilteredProcess{T<:TimeStyle, P<:StochasticProcess{>:T}} <: StationaryProcess{T} end
+
+"""
+Differential process `X(t±δ) - X(t)`
+"""
 abstract type DifferentialProcess{T<:TimeStyle, P<:StochasticProcess{>:T}} <: FilteredProcess{T, P} end  # Process as first order finite difference of another process.
+
+"""
+Discrete time differential process `X((n±l)δ) - X(nδ)` with `l` being the lag.
+"""
 abstract type IncrementProcess{P<:StochasticProcess} <: DifferentialProcess{DiscreteTime, P} end
 
 
@@ -37,13 +51,10 @@ ss_exponent(X::SelfSimilarProcess) = throw(NotImplementedError())
 """
 Return the filter of the process.
 """
-filter(X::FilteredProcess) = throw(NotImplementedError())
+filter(X::FilteredProcess)::AbstractVector = throw(NotImplementedError())
 
-@doc raw"""
+"""
 Test whether the filtration is causal:
-\sum_{n=0}^{N-1} a[n] X(t-nδ)
-or anti-causal:
-\sum_{n=0}^{N-1} a[n] X(t+nδ)
 """
 iscausal(X::FilteredProcess) = throw(NotImplementedError())
 
@@ -55,15 +66,33 @@ parent_process(X::FilteredProcess) = throw(NotImplementedError())
 """
 Return the step of the filtered process.
 """
-step(X::FilteredProcess) = throw(NotImplementedError())
+step(X::FilteredProcess)::Real = throw(NotImplementedError())
 
 """
-Return the gap of difference of the process.
+Filter of differential process, defined as
+- causal: X(t) - X(t-lδ)
+- anti-causal: X(t+lδ) - X(t)
+with `l= lag(X)`.
 """
-gap(X::DifferentialProcess) = throw(NotImplementedError())
+function filter(X::DifferentialProcess)
+    filt = vcat(1, zeros(lag(X)-1), -1)
+    return causal(X) ? filt : reverse(filt)
+end
+
+"""
+Return the lag of differential process.
+"""
+lag(X::DifferentialProcess) = throw(NotImplementedError())
 
 
 #### Generic identifiers ####
+"""
+Test whether a process is stationary.
+"""
+iscontinuoustime(X::StochasticProcess{ContinuousTime}) = true
+iscontinuoustime(X::StochasticProcess{DiscreteTime}) = false
+
+
 """
 Test whether a process is time discrete (a time series).
 """
@@ -169,13 +198,20 @@ function autocov!(C::Matrix{<:AbstractFloat}, X::StationaryProcess{T}, G::Abstra
 
     # construct the covariance matrix (a Toeplitz matrix)
     N = size(C, 1)
-    knl = covseq(X, G)  # autocovariance sequence
-    for c = 1:N, r = 1:N
-        C[r,c] = knl[abs(r-c)+1]
+    return covmat!(C, covseq(X,G))
+end
+
+"""
+Construct the covariance matrix form the covariance sequence.
+"""
+function covmat!(C::Matrix{T}, S::AbstractVector{T}) where {T<:Real}
+    for c = 1:length(S), r = 1:length(S)
+        @inbounds C[r,c] = S[abs(r-c)+1]
     end
     return C
 end
 
+covmat(S::AbstractVector{T}) where {T<:Real} = covmat!(zeros(T, length(S), length(S)), S)
 
 """
 Return the auto-covarince matrix of a stochastic process on a sampling grid.
@@ -246,30 +282,19 @@ end
 #### Statistical inference on stochastic process ####
 
 """
-Conditional mean of a Gaussian process `P` on the position `Gx` given the value `Y` on the postion `Gy`.
+Conditional mean and covariance of a Gaussian process `P` on the position `Gx` given the value `Y` on the postion `Gy`.
 """
-function cond_mean(P::StochasticProcess{T}, Gx::AbstractVector{T}, Gy::AbstractVector{T}, Y::AbstractVector{<:Real}) where T<:TimeStyle
+function cond_mean_cov(P::StochasticProcess{T}, Gx::AbstractVector{T}, Gy::AbstractVector{T}, Y::AbstractVector{<:Real}) where T<:TimeStyle
     @assert length(Gy) == length(Y)
-    Σxy = covmat(P, Gx, Gy)
-    Σyy = covmat(P, Gy)
-    return Σxy * (Σyy\Y)
-end
 
-cond_mean(P::StochasticProcess, gx::ContinuousTime, Gy::AbstractVector, Y::AbstractVector) = cond_mean(P, [gx], Gy, Y)
-
-
-"""
-Conditional covariance of a Gaussian process `P` on the position `Gx` given the value `Y` on the postion `Gy`.
-"""
-function cond_cov(P::StochasticProcess{T}, Gx::AbstractVector{T}, Gy::AbstractVector{T}, Y::AbstractVector{<:Real}) where T<:TimeStyle
-    @assert length(Gy) == length(Y)
     Σxx = covmat(P, Gx)
     Σxy = covmat(P, Gx, Gy)
     Σyy = covmat(P, Gy)
-    return Σxx - Σxy * inv(Σyy) * Σxy'
+    return  Σxy * (Σyy\Y), Σxx - Σxy * inv(Σyy) * Σxy'
 end
 
-cond_cov(P::StochasticProcess, gx::ContinuousTime, Gy::AbstractVector, Y::AbstractVector) = cond_cov(P, [gx], Gy, Y)
+cond_mean_cov(P::StochasticProcess, gx::ContinuousTime, Gy::AbstractVector, Y::AbstractVector) = cond_mean_cov(P, [gx], Gy, Y)
+
 
 include("FBM.jl")
 include("MFBM.jl")

@@ -184,7 +184,7 @@ function LevinsonDurbin(cseq::AbstractVector{<:Real})
 
         # initialization
         # pseq: linear prediction coefficients
-        pseq = Vector{Vector{Float64}}(N-1); pseq[1] = [cseq[2]/cseq[1]]
+        pseq = Vector{Vector{Float64}}(undef, N-1); pseq[1] = [cseq[2]/cseq[1]]
         # sseq: variances of residual
         sseq = zeros(N); sseq[1] = cseq[1]; sseq[2] = (1-pseq[1][1]^2) * sseq[1]
         # rseq: partial correlation coefficients
