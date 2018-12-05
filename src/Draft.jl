@@ -537,3 +537,23 @@ function wavelet_MLE_estim(X::Matrix{Float64}, sclrng::AbstractVector{Int}, v::I
     return (hurst, σ), opm
 end
 
+
+
+
+
+function split_by_day(data::TimeArray)
+    res = []
+    d0, d1 = Dates.Date(TimeSeries.timestamp(data[1])[1]), Dates.Date(TimeSeries.timestamp(data[end])[1])
+
+    for d in d0:Dates.Day(1):d1
+        m0 = Dates.DateTime(d)
+        m1 = Dates.DateTime(d + Dates.Hour(23) + Dates.Minute(59))
+        mtsp = m0:Dates.Minute(1):m1  # full timestamp
+        stsp = intersect(mtsp, TimeSeries.timestamp(data))  # valid timestamp
+        if length(stsp) > 0
+            push!(res, data[mtsp])
+        end
+    end
+
+    return res
+end

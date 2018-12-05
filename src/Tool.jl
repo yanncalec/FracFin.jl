@@ -7,7 +7,7 @@ Apply a function on a rolling window with hard truncation at boundaries.
 
 # Args
 - func: function to be applied, taking matrix as input and returning a vector or a scalar
-- X0: input data, vector or matrix. For matrix the rolling window runs through the row direction.
+- X0: input data, vector or matrix. For matrix the rolling window runs through the row direction (i.e. horizontally, each column corresponds to a time)
 - s: size of rolling window
 - d: step of rolling window
 - mode: :causal or :anticausal
@@ -249,11 +249,15 @@ row_normalize!(A) = col_normalize!(transpose(A))
 
 
 """
-Compute d-lag finite difference of a vector.
+Compute d-lag finite difference of a vector or matrix (in row direction).
 """
-function lagdiff(X::AbstractVector{<:Real}, d::Int, mode::Symbol=:causal)
-    dX = fill(NaN, length(X))
-    dX[d+1:end] = X[d+1:end]-X[1:end-d]
+function lagdiff(X::AbstractVecOrMat{<:Number}, d::Int, mode::Symbol=:causal)
+    dX = fill(NaN, size(X))
+    if ndims(X) == 1
+        dX[d+1:end] = X[d+1:end]-X[1:end-d]
+    else
+        dX[d+1:end,:] = X[d+1:end,:]-X[1:end-d,:]
+    end
     return (mode==:causal) ? dX : circshift(dX, -d)
 end
 
@@ -283,11 +287,14 @@ bfill(X) = bfill!(copy(X))
 
 
 """
-Split a TimeArray with truncation.
+Split an object of `TimeArray` by applying truncation.
 
 # Args
-- t0: beginning of the day, e.g., `Dates.Hour(9) + Dates.Minute(5)` for `09:05`
-- t1: ending of the day, e.g., `Dates.Hour(17) + Dates.Minute(24)` for `17:24`
+- data: input object of `TimeArray`
+- T: unit of time period, e.g. `Dates.Day(1)`
+- (wa,wb): relative starting and ending time w.r.t. to `T`, e.g., `Dates.Hour(9) + Dates.Minute(5)` for `09:05` and `Dates.Hour(17) + Dates.Minute(24)` for `17:24`.
+- fillmode: fill mode for nan values, :f forward, :b backward, :fb forward-backward, :bf backward-forward
+- endpoint: if true include the endpoint whenever possible
 
 # Notes
 """
@@ -348,38 +355,25 @@ function _window_timearray(A::TimeArray, tstp::AbstractVector{<:Dates.AbstractTi
 end
 
 
-
-function split_by_day(data::TimeArray)
-    res = []
-    d0, d1 = Dates.Date(TimeSeries.timestamp(data[1])[1]), Dates.Date(TimeSeries.timestamp(data[end])[1])
-
-    for d in d0:Dates.Day(1):d1
-        m0 = Dates.DateTime(d)
-        m1 = Dates.DateTime(d + Dates.Hour(23) + Dates.Minute(59))
-        mtsp = m0:Dates.Minute(1):m1  # full timestamp
-        stsp = intersect(mtsp, TimeSeries.timestamp(data))  # valid timestamp
-        if length(stsp) > 0
-            push!(res, data[mtsp])
-        end
-    end
-
-    return res
-end
-
-
 """
 Equalize the first point of the day with the last point of the previous day.
 
 # Notes
 - Useful in processing of stock price
 """
-function equalize_daynight(sdata)
+function equalize_daynight(sdata::AbstractVector)
+    @assert typeof(sdata[1]) <: TimeArray
+    N = ndims(sdata[1])
+    @assert N<=2
     edata = [sdata[1]]
+    func = (x,y) -> (N==2) ? x[:,1]-y[:,end] : x[1]-y[end]
+
     for n=2:length(sdata)
         d0 = TimeSeries.values(edata[n-1])
         d1 = TimeSeries.values(sdata[n])
         t1 = TimeSeries.timestamp(sdata[n])
-        push!(edata, TimeSeries.TimeArray(t1, d1.-(d1[1]-d0[end]), TimeSeries.colnames(sdata[1])))
+        # push!(edata, TimeSeries.TimeArray(t1, d1.-(d1[1]-d0[end]), TimeSeries.colnames(sdata[1])))  # <- TODO: d0[end] or d1[1] is NaN? d1 is 2d array?
+        push!(edata, TimeSeries.TimeArray(t1, d1.-func(d1,d0), TimeSeries.colnames(sdata[1])))  # <- TODO: d0[end] or d1[1] is NaN? d1 is 2d array?
     end
     return edata
 end

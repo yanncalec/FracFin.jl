@@ -75,6 +75,26 @@ function robustvar(X::AbstractArray{T}; dims::Int=1) where {T<:Number}
 end
 
 
+"""Principal Component Analysis.
+
+# Args
+-X (2d array): each row represents a variable and each column represents an observation
+-nc (int): number of components to hold
+
+# Returns
+- C, U : coefficients and corresponded principal directions
+"""
+function pca(X::AbstractMatrix, nc::Int, w::StatsBase.AbstractWeights, center=false)
+    U, S, V = svd(cov(X, X, w))
+    mX = mean(X, w, 1)
+    C = center ? (X .- mX) * U' : X * U'
+
+    return C[:,1:nc], U[:,1:nc], S[1:nc]
+end
+
+pca(X::AbstractMatrix, nc::Int, center=false) = pca(X, nc, StatsBase.weights(ones(size(X,1))), center)
+
+
 ######## Linear models ########
 """
 Multi-linear regression in the column direction. 
@@ -86,7 +106,8 @@ function multi_linear_regression_colwise(Y::AbstractVecOrMat{T}, X::AbstractVecO
     μx = mean(X, w, 1)[:]
     Σyx = cov(Y, X, w)  # this calls user defined cov function
     Σxx = cov(X, X, w)
-    A = Σyx / Σxx  # scalar or matrix, i.e., Σyx * inv(Σxx), 
+    # A = Σyx / Σxx  # scalar or matrix, i.e., Σyx * inv(Σxx)
+    A = Σyx * pinv(Σxx)  # scalar or matrix, i.e., Σyx * inv(Σxx)
     β = μy - A * μx  # scalar or vector
     E = Y - (A * X' .+ β)'
     Σ = cov(E, E, w)
@@ -224,6 +245,91 @@ end
 
 function rolling_estim(func::Function, X0::AbstractVecOrMat{T}, w::Int, p::Int, trans::Function=(x->x); kwargs...) where {T<:Number}
     return rolling_estim(func, X0, (w,w,1), p, trans; kwargs...)
+end
+
+
+function rolling_regress_predict(regressor::Function, predictor::Function, X0::AbstractVecOrMat{T}, Y0::AbstractVecOrMat{T}, (w,s,d)::Tuple{Int,Int,Int}, p::Int, trans::Function=(x->vec(x)); mode::Symbol=:causal, nan::Symbol=:ignore) where {T<:Number}
+    X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
+    Y = ndims(Y0)>1 ? Y0 : reshape(Y0, 1, :)    
+    @assert size(X,2) == size(Y,2)
+    
+    L = size(X,2)
+    # @assert w >= s && L >= s
+    
+    res = []  # list of final result
+    res_time, res_reg, res_prd = [], [], []  # temporary lists
+
+    if mode == :causal  # causal
+        xf, yf = [], []  # future data (due to reversal of time) used for prediction
+
+        for t = L:-p:1
+            xv = rolling_apply_hard(trans, view(X, :, max(1, t-w+1):t), s, d; mode=:causal)
+            yv = rolling_apply_hard(trans, view(Y, :, max(1, t-w+1):t), s, d; mode=:causal)[1:size(Y,1),:]
+            (xs, ys) = if nan == :ignore
+                # ignore columns containing nan values
+                idx = findall(.!vec(any(isnan.(xv), dims=1) .& any(isnan.(yv), dims=1)))  # without vec findall return `CartesianIndex`
+
+                if length(idx) > 0
+                    (view(xv,:,idx), view(yv,:,idx))
+                else
+                    ([], [])
+                end
+            elseif nan == :zero
+                # set all nan to zero
+                xv[findall(isnan.(xv))] = 0
+                yv[findall(isnan.(yv))] = 0
+                (xv, yv)                
+            else
+                (xv, yv)
+            end
+
+            if length(xs) > 0 && length(ys) > 0
+                # println(size(xs))
+                # println(size(ys))
+                reg = regressor(ys', xs')
+                prd = isempty(xf) ? [] : predictor(reg, xf, yf)
+                pushfirst!(res_time, t)
+                pushfirst!(res_reg, reg)
+                pushfirst!(res_prd, prd)
+            end
+            xf, yf = xv[:,end], yv[:,end]  # yv[:,end] is the future truth
+        end
+        res_prd = circshift(res_prd, 1)  # readjust the prediction
+    else  # anticausal
+        for t = 1:p:L
+            xv = rolling_apply_hard(trans, view(X, :, t:min(L, t+w-1)), s, d; mode=:anticausal)
+            yv = rolling_apply_hard(trans, view(Y, :, t:min(L, t+w-1)), 1, d; mode=:anticausal)
+
+            (xs, ys) = if nan == :ignore
+                # ignore columns containing nan values
+                idx = findall(.!vec(any(isnan.(xv), dims=1) + any(isnan.(yv), dims=1)))  # without vec findall return `CartesianIndex`
+
+                if length(idx) > 0
+                    (view(xv,:,idx), view(yv,:,idx))
+                else
+                    ([], [])
+                end
+            elseif nan == :zero
+                # set all nan to zero
+                xv[findall(isnan.(xv))] = 0
+                yv[findall(isnan.(yv))] = 0
+                (xv, yv)                
+            else
+                (xv, yv)
+            end
+            
+            if length(xs) > 0 && length(ys) > 0
+                # push!(res, (t,regressor(ys, xs)))
+                reg = regressor(ys, xs)                
+                prd = isempty(res_reg) ? [] : predictor(res_reg[end], xv, yv[:,end])
+                pushfirst!(res_time, t)
+                pushfirst!(res_reg, reg)
+                pushfirst!(res_prd, prd)                
+            end
+        end
+    end
+    res = [(time=t, regression=reg, prediction=prd) for (t, reg, prd) in zip(res_time, res_reg, res_prd)]  # final result is a named tuple    
+    return res
 end
 
 
