@@ -5,6 +5,7 @@ module FracFin
 using LinearAlgebra
 using Statistics
 using StatsBase
+using Formatting
 
 import Base: rand, length, size, show, promote_rule, binomial
 import StatsBase: autocov!, autocov
@@ -51,6 +52,19 @@ struct NotImplementedError <: Exception
     NotImplementedError() = new("")
 end
 show(io::IO, exc::NotImplementedError) = print(io, string("NotImplementedError:\n",exc.errmsg))
+
+
+"""
+    Exception for not implemented methods.
+"""
+struct ValueError <: Exception
+    errmsg::AbstractString
+    # errpos::Int64
+
+    NotImplementedError() = new("")
+end
+show(io::IO, exc::ValueError) = print(io, string("ValueError:\n",exc.errmsg))
+
 
 # export
 #     StochasticProcess,

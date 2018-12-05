@@ -101,13 +101,19 @@ Multi-linear regression in the column direction.
 """
 function multi_linear_regression_colwise(Y::AbstractVecOrMat{T}, X::AbstractVecOrMat{T}, w::StatsBase.AbstractWeights) where {T<:Real}
     @assert size(Y,1)==size(X,1)==length(w)
-
+    # println("size(Y)=",size(Y))
+    # println("size(X)=",size(X))
     μy = mean(Y, w, 1)[:]  # Julia function (version <= 0.7) `mean` does not take keyword argument `dims=1` if weight is passed.
     μx = mean(X, w, 1)[:]
-    Σyx = cov(Y, X, w)  # this calls user defined cov function
+    Σyx = cov(Y, X, w)   # this calls user defined cov function
     Σxx = cov(X, X, w)
-    # A = Σyx / Σxx  # scalar or matrix, i.e., Σyx * inv(Σxx)
-    A = Σyx * pinv(Σxx)  # scalar or matrix, i.e., Σyx * inv(Σxx)
+    Σxx += 1e-8 * Matrix{Float64}(I,size(Σxx))  # perturbation
+    A = Σyx / Σxx  # scalar or matrix, i.e., Σyx * inv(Σxx)
+    # A = try
+    #     Σyx * pinv(Σxx)  # scalar or matrix, i.e., Σyx * inv(Σxx)
+    # catch
+    #     zero(Σyx)
+    # end
     β = μy - A * μx  # scalar or vector
     E = Y - (A * X' .+ β)'
     Σ = cov(E, E, w)
@@ -248,87 +254,52 @@ function rolling_estim(func::Function, X0::AbstractVecOrMat{T}, w::Int, p::Int, 
 end
 
 
-function rolling_regress_predict(regressor::Function, predictor::Function, X0::AbstractVecOrMat{T}, Y0::AbstractVecOrMat{T}, (w,s,d)::Tuple{Int,Int,Int}, p::Int, trans::Function=(x->vec(x)); mode::Symbol=:causal, nan::Symbol=:ignore) where {T<:Number}
+function rolling_regress_predict(regressor::Function, predictor::Function, X0::AbstractVecOrMat{T}, Y0::AbstractVecOrMat{T}, X1::AbstractVecOrMat{T}, Y1::AbstractVecOrMat{T}, (w,s,d)::Tuple{Int,Int,Int}, p::Int, trans::Function=(x->vec(x)); mode::Symbol=:causal) where {T<:Number}
     X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
-    Y = ndims(Y0)>1 ? Y0 : reshape(Y0, 1, :)    
-    @assert size(X,2) == size(Y,2)
+    Y = ndims(Y0)>1 ? Y0 : reshape(Y0, 1, :)        
+    @assert size(X,2) == size(Y,2)    
+
+    @assert size(X0) == size(X1)  
+    @assert size(Y0) == size(Y1)  
+    Xp = ndims(X1)>1 ? X1 : reshape(X1, 1, :)  # vec to matrix, create a reference not a copy
+    Yp = ndims(Y1)>1 ? Y1 : reshape(Y1, 1, :)        
+
+    (any(isnan.(X)) || any(isnan.(Y))) && throw(ValueError("Inputs cannot contain nan values!"))
+    (any(isnan.(Xp)) || any(isnan.(Yp))) && throw(ValueError("Inputs cannot contain nan values!"))
+    L = size(X,2)  # total time
+    @assert L >= w >= s
     
-    L = size(X,2)
-    # @assert w >= s && L >= s
-    
-    res = []  # list of final result
-    res_time, res_reg, res_prd = [], [], []  # temporary lists
+    res = []
 
     if mode == :causal  # causal
-        xf, yf = [], []  # future data (due to reversal of time) used for prediction
+        tf, xf, yf = [], [], []  # future time and data used for prediction
 
-        for t = L:-p:1
-            xv = rolling_apply_hard(trans, view(X, :, max(1, t-w+1):t), s, d; mode=:causal)
-            yv = rolling_apply_hard(trans, view(Y, :, max(1, t-w+1):t), s, d; mode=:causal)[1:size(Y,1),:]
-            (xs, ys) = if nan == :ignore
-                # ignore columns containing nan values
-                idx = findall(.!vec(any(isnan.(xv), dims=1) .& any(isnan.(yv), dims=1)))  # without vec findall return `CartesianIndex`
+        for t = L:-p:w
+            printfmtln("Processing time {}...\r", t)
 
-                if length(idx) > 0
-                    (view(xv,:,idx), view(yv,:,idx))
-                else
-                    ([], [])
-                end
-            elseif nan == :zero
-                # set all nan to zero
-                xv[findall(isnan.(xv))] = 0
-                yv[findall(isnan.(yv))] = 0
-                (xv, yv)                
-            else
-                (xv, yv)
-            end
+            xv = rolling_apply_hard(trans, view(X, :, t-w+1:t), s, d; mode=:causal)
+            yv0 = view(Y, :, t-w+1:t)[:, end:-d:1]  # time-reversed
+            yv = yv0[:,1:size(xv,2)][:,end:-1:1]  # reverse back
+    
+            reg = regressor(yv, xv)  # regression
 
-            if length(xs) > 0 && length(ys) > 0
-                # println(size(xs))
-                # println(size(ys))
-                reg = regressor(ys', xs')
-                prd = isempty(xf) ? [] : predictor(reg, xf, yf)
-                pushfirst!(res_time, t)
-                pushfirst!(res_reg, reg)
-                pushfirst!(res_prd, prd)
-            end
-            xf, yf = xv[:,end], yv[:,end]  # yv[:,end] is the future truth
+            xf = trans(Xp[:,t-s+1:t])
+            yf = Yp[:,t]
+            prd = predictor(reg, xf, yf)  # prediction using future data
+            
+            pushfirst!(res, (time=t, regression=reg, prediction=prd))
         end
-        res_prd = circshift(res_prd, 1)  # readjust the prediction
-    else  # anticausal
+    else  # anticausal: TODO
         for t = 1:p:L
             xv = rolling_apply_hard(trans, view(X, :, t:min(L, t+w-1)), s, d; mode=:anticausal)
             yv = rolling_apply_hard(trans, view(Y, :, t:min(L, t+w-1)), 1, d; mode=:anticausal)
 
-            (xs, ys) = if nan == :ignore
-                # ignore columns containing nan values
-                idx = findall(.!vec(any(isnan.(xv), dims=1) + any(isnan.(yv), dims=1)))  # without vec findall return `CartesianIndex`
-
-                if length(idx) > 0
-                    (view(xv,:,idx), view(yv,:,idx))
-                else
-                    ([], [])
-                end
-            elseif nan == :zero
-                # set all nan to zero
-                xv[findall(isnan.(xv))] = 0
-                yv[findall(isnan.(yv))] = 0
-                (xv, yv)                
-            else
-                (xv, yv)
-            end
-            
-            if length(xs) > 0 && length(ys) > 0
-                # push!(res, (t,regressor(ys, xs)))
-                reg = regressor(ys, xs)                
-                prd = isempty(res_reg) ? [] : predictor(res_reg[end], xv, yv[:,end])
-                pushfirst!(res_time, t)
-                pushfirst!(res_reg, reg)
-                pushfirst!(res_prd, prd)                
-            end
+            reg = regressor(yv, xv)                
+            prd = isempty(res_reg) ? [] : predictor(res_reg[end], xv, yv[:,end])
+            # TODO
         end
     end
-    res = [(time=t, regression=reg, prediction=prd) for (t, reg, prd) in zip(res_time, res_reg, res_prd)]  # final result is a named tuple    
+
     return res
 end
 
@@ -399,3 +370,16 @@ function rolling_estim_predict(estim::Function, predict::Function, X0::AbstractV
     end
     return res
 end
+
+
+function linear_predictor(R::Tuple,X0::AbstractVecOrMat,Y0::AbstractVecOrMat=[])
+    A,β = R[1]
+    Yp = A * X0 .+ β
+#     println(size(A))
+#     println(size(β))
+#     println(size(Yp))
+#     println(size(Y0))
+    Ep = isempty(Y0) ? [] : Y0-Yp  # error of prediction
+    return Yp, Y0, Ep
+end
+
