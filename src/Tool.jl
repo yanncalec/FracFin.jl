@@ -366,7 +366,7 @@ function equalize_daynight(sdata::AbstractVector)
     N = ndims(sdata[1])
     @assert N<=2
     edata = [sdata[1]]
-    func = (x,y) -> (N==2) ? x[:,1]-y[:,end] : x[1]-y[end]
+    func = (x,y) -> (N==2) ? x[[1],:]-y[[end],:] : x[1]-y[end]
 
     for n=2:length(sdata)
         d0 = TimeSeries.values(edata[n-1])
