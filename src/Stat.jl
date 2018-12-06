@@ -107,7 +107,7 @@ function multi_linear_regression_colwise(Y::AbstractVecOrMat{T}, X::AbstractVecO
     μx = mean(X, w, 1)[:]
     Σyx = cov(Y, X, w)   # this calls user defined cov function
     Σxx = cov(X, X, w)
-    Σxx += 1e-8 * Matrix{Float64}(I,size(Σxx))  # perturbation
+    # Σxx += 1e-8 * Matrix{Float64}(I,size(Σxx))  # perturbation
     A = Σyx / Σxx  # scalar or matrix, i.e., Σyx * inv(Σxx)
     # A = try
     #     Σyx * pinv(Σxx)  # scalar or matrix, i.e., Σyx * inv(Σxx)
@@ -275,7 +275,7 @@ function rolling_regress_predict(regressor::Function, predictor::Function, X0::A
         tf, xf, yf = [], [], []  # future time and data used for prediction
 
         for t = L:-p:w
-            printfmtln("Processing time {}...\r", t)
+            # printfmtln("Processing time {}...\r", t)
 
             xv = rolling_apply_hard(trans, view(X, :, t-w+1:t), s, d; mode=:causal)
             yv0 = view(Y, :, t-w+1:t)[:, end:-d:1]  # time-reversed

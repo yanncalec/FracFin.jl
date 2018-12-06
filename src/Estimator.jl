@@ -342,7 +342,7 @@ function fGn_MLE_estim(X::AbstractVecOrMat{T}, d::Int; method::Symbol=:optim, ε
     end
 
     # Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(hurst, 1.), size(X,1))))
-    Σ = Matrix(Symmetric(fGn_covmat(hurst, size(X,1), d)))
+    Σ = Matrix(Symmetric(fGn_covmat(size(X,1), hurst, d)))
     σ = sqrt(xiAx(Σ, X) / length(X))
     L = log_likelihood_H(Σ, X)
 

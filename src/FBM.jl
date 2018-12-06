@@ -132,9 +132,10 @@ function fGn_covmat(G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, H::R
     return Σ
 end
 
-fGn_covmat(G::AbstractVector{<:Real}, H::Real) = Matrix(Symmetric(fGn_covmat(G, G, H)))
+fGn_covmat(G::AbstractVector{<:Real}, H::Real, δ::Real) = Matrix(Symmetric(fGn_covmat(G, G, H, δ)))
 
-# fGn_covmat(N::Integer, H::Real, d::Integer) = covmat(fGn_autocov.(1:N, H, d))
+fGn_covmat(N::Integer, H::Real, d::Integer) = fGn_covmat(1:N, H, d)
+
 
 ######## Fractional Wavelet noise (fWn) ########
 """
