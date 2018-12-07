@@ -107,13 +107,18 @@ function multi_linear_regression_colwise(Y::AbstractVecOrMat{T}, X::AbstractVecO
     μx = mean(X, w, 1)[:]
     Σyx = cov(Y, X, w)   # this calls user defined cov function
     Σxx = cov(X, X, w)
-    # Σxx += 1e-8 * Matrix{Float64}(I,size(Σxx))  # perturbation
-    A = Σyx / Σxx  # scalar or matrix, i.e., Σyx * inv(Σxx)
+
+    # Σxx += 1e-5 * Matrix{Float64}(I,size(Σxx))  # perturbation
+    # A = Σyx / Σxx  # scalar or matrix, i.e., Σyx * inv(Σxx)
+
+    A = Σyx * pinv(Σxx)  # scalar or matrix, i.e., Σyx * inv(Σxx)
+
     # A = try
     #     Σyx * pinv(Σxx)  # scalar or matrix, i.e., Σyx * inv(Σxx)
     # catch
     #     zero(Σyx)
     # end
+
     β = μy - A * μx  # scalar or vector
     E = Y - (A * X' .+ β)'
     Σ = cov(E, E, w)

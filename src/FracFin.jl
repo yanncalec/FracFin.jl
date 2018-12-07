@@ -50,8 +50,9 @@ struct NotImplementedError <: Exception
     # errpos::Int64
 
     NotImplementedError() = new("")
+    NotImplementedError(msg::AbstractString) = new(msg)
 end
-show(io::IO, exc::NotImplementedError) = print(io, string("NotImplementedError:\n",exc.errmsg))
+show(io::IO, exc::NotImplementedError) = print(io, string("NotImplementedError: ",exc.errmsg))
 
 
 """
@@ -61,9 +62,10 @@ struct ValueError <: Exception
     errmsg::AbstractString
     # errpos::Int64
 
-    NotImplementedError() = new("")
+    ValueError() = new("")
+    ValueError(msg::AbstractString) = new(msg)
 end
-show(io::IO, exc::ValueError) = print(io, string("ValueError:\n",exc.errmsg))
+show(io::IO, exc::ValueError) = print(io, string("ValueError: ",exc.errmsg))
 
 
 # export
