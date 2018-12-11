@@ -41,31 +41,31 @@ const pywt = PyCall.PyNULL()
 #     copy!(pywt, PyCall.pyimport("pywt"))
 # end
 
-
-"""
-    Exception for not implemented methods.
-"""
-struct NotImplementedError <: Exception
-    errmsg::AbstractString
-    # errpos::Int64
-
-    NotImplementedError() = new("")
-    NotImplementedError(msg::AbstractString) = new(msg)
+# Metaprogramming for class of exceptions
+for ErrType in [:NotImplementedError, :ValueError]
+    @eval begin
+        struct $ErrType <: Exception
+            errmsg::AbstractString
+                
+            $ErrType(msg::AbstractString="") = new(msg)
+        end
+        show(io::IO, exc::$ErrType) = print(io, string("$ErrType: ",exc.errmsg))        
+    end
 end
-show(io::IO, exc::NotImplementedError) = print(io, string("NotImplementedError: ",exc.errmsg))
 
-
-"""
-    Exception for not implemented methods.
-"""
-struct ValueError <: Exception
-    errmsg::AbstractString
-    # errpos::Int64
-
-    ValueError() = new("")
-    ValueError(msg::AbstractString) = new(msg)
-end
-show(io::IO, exc::ValueError) = print(io, string("ValueError: ",exc.errmsg))
+# # which is equivalent to the following:
+#
+# """
+#     Exception for not implemented methods.
+# """
+# struct NotImplementedError <: Exception
+#     errmsg::AbstractString
+#     # errpos::Int64
+#     NotImplementedError() = new("")
+#     NotImplementedError(msg::AbstractString) = new(msg)
+# end
+#
+# show(io::IO, exc::NotImplementedError) = print(io, string("NotImplementedError: ",exc.errmsg))
 
 
 # export
@@ -75,7 +75,6 @@ show(io::IO, exc::ValueError) = print(io, string("ValueError: ",exc.errmsg))
 
 include("Common.jl")
 include("StochasticProcess.jl")
-
 include("Sampler.jl")
 include("Tool.jl")
 include("CHA.jl")

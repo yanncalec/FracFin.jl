@@ -1,7 +1,6 @@
-######### Estimators for fractional processes #########
+######### Estimators for fBm and related processes #########
 
-######## Estimators for fBm ########
-
+###### Power law ######
 """
 Compute the p-th moment of the increment of time-lag `d` of a 1d array.
 """
@@ -43,8 +42,8 @@ function powlaw_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, p::Real=2
 end
 const fBm_powlaw_estim = powlaw_estim
 
-##### Generalized scalogram #####
 
+####### Generalized scalogram #######
 """
 B-Spline scalogram estimator for Hurst exponent and volatility.
 

@@ -3,6 +3,7 @@
 abstract type AbstractRandomField end
 abstract type AbstractRealRandomField <: AbstractRandomField end
 
+
 """
 Generic zero-mean real-valued stochastic process.
 """
@@ -10,24 +11,28 @@ abstract type StochasticProcess{T<:TimeStyle} <: AbstractRealRandomField end
 const ContinuousTimeStochasticProcess = StochasticProcess{ContinuousTime}
 const DiscreteTimeStochasticProcess = StochasticProcess{DiscreteTime}
 
+
 abstract type StationaryProcess{T} <: StochasticProcess{T} end
 const ContinuousTimeStationaryProcess = StationaryProcess{ContinuousTime}
 const DiscreteTimeStationaryProcess = StationaryProcess{DiscreteTime}
 
+
 abstract type SelfSimilarProcess <: ContinuousTimeStochasticProcess end
 abstract type SSSIProcess <: SelfSimilarProcess end  #
+
 
 @doc raw"""
 Stationary process resulting from filtration (without DC) of another process.
 
-It is defined as, causal version:
-\sum_{n=0}^{N-1} a[n+1] X(t-nδ)
-anti-causal version:
-\sum_{n=0}^{N-1} a[n+1] X(t+nδ)
+The causal version is defined as:
+    \sum_{n=0}^{N-1} a[n+1] X(t-nδ)
+
+and the anti-causal version:
+    \sum_{n=0}^{N-1} a[n+1] X(t+nδ)
 
 # Note
 - Under the stationarity assumption the causality has no effect on the auto-covariance function.
-- The aimed concrete type of IncrementProcess is fGn which is stationary. However due to the lack of multiple inheritance in Julia it is very hard to make IncrementProcess a subtype of StationaryProcess. Possible solutions to this problem include 1) SimpleTrait.jl,  2) copy functions defined for StationaryProcess,  3) force FilterdProcess to be a subtype of StationaryProcess. We take the solution 3) here.
+- The aimed concrete type of the abstract type `IncrementProcess` is `FractionalGaussianNoise` (fGn) which is stationary. However due to the lack of multiple inheritance in Julia it is very hard to make `IncrementProcess` a subtype of `StationaryProcess`. Possible solutions to this problem include 1) SimpleTrait.jl,  2) copy functions defined for `StationaryProcess`,  3) force `FilteredProcess` to be a subtype of `StationaryProcess`. We adopt the solution 3) here.
 """
 abstract type FilteredProcess{T<:TimeStyle, P<:StochasticProcess{>:T}} <: StationaryProcess{T} end
 
@@ -40,6 +45,7 @@ abstract type DifferentialProcess{T<:TimeStyle, P<:StochasticProcess{>:T}} <: Fi
 Discrete time differential process `X((n±l)δ) - X(nδ)` with `l` being the lag.
 """
 abstract type IncrementProcess{P<:StochasticProcess} <: DifferentialProcess{DiscreteTime, P} end
+
 
 
 #### Process specific functions ####
@@ -64,15 +70,15 @@ Return the parent process of the filtered process.
 parent_process(X::FilteredProcess) = throw(NotImplementedError())
 
 """
-Return the step of the filtered process.
+Return the step `δ` of the filtered process.
 """
 step(X::FilteredProcess)::Real = throw(NotImplementedError())
 
 """
 Filter of differential process, defined as
-- causal: X(t) - X(t-lδ)
-- anti-causal: X(t+lδ) - X(t)
-with `l= lag(X)`.
+- the causal case: X(t) - X(t-lδ)
+- the anti-causal case: X(t+lδ) - X(t)
+with `l = lag(X)`.
 """
 function filter(X::DifferentialProcess)
     filt = vcat(1, zeros(lag(X)-1), -1)
@@ -87,14 +93,13 @@ lag(X::DifferentialProcess) = throw(NotImplementedError())
 
 #### Generic identifiers ####
 """
-Test whether a process is stationary.
+Test whether a process is time discrete (a time series).
 """
 iscontinuoustime(X::StochasticProcess{ContinuousTime}) = true
 iscontinuoustime(X::StochasticProcess{DiscreteTime}) = false
 
-
 """
-Test whether a process is time discrete (a time series).
+Test whether a process is multivariate.
 """
 ismultivariate(X::StochasticProcess) = false
 
@@ -102,8 +107,8 @@ ismultivariate(X::StochasticProcess) = false
 Test whether a process has stationary increments.
 """
 isincrementstationary(X::StochasticProcess) = false
-isincrementstationary(X::StationaryProcess) = true
 isincrementstationary(X::SSSIProcess) = true
+isincrementstationary(X::StationaryProcess) = true
 
 """
 Test whether a process is stationary.
@@ -120,7 +125,7 @@ Determine whether a grid has the constant step.
 function isregulargrid(G::AbstractVector)
     return if length(G) == 2
         true
-    elseif length(G) > 2
+    elseif length(G) > 2  # second order difference should be close to 0
         isapprox(maximum(abs.(diff(diff(G)))), 0.0; atol=1e-10)
     else
         false
@@ -201,37 +206,48 @@ function autocov!(C::Matrix{<:AbstractFloat}, X::StationaryProcess{T}, G::Abstra
     return covmat!(C, covseq(X,G))
 end
 
+
 """
-Construct the covariance matrix form the covariance sequence.
+Construct the covariance matrix from the covariance sequence.
 """
 function covmat!(C::Matrix{T}, S::AbstractVector{T}) where {T<:Real}
     for c = 1:length(S), r = 1:length(S)
-        @inbounds C[r,c] = S[abs(r-c)+1]
+        C[r,c] = S[abs(r-c)+1]
     end
     return C
 end
 
 covmat(S::AbstractVector{T}) where {T<:Real} = covmat!(zeros(T, length(S), length(S)), S)
 
+
 """
 Return the auto-covarince matrix of a stochastic process on a sampling grid.
 """
 covmat(X::StochasticProcess, G::AbstractVector) = autocov!(zeros(length(G), length(G)), X, G)
 
+
+"""
+Return the auto-covarince matrix of a stochastic process on two sampling grids.
+
+The `(i,j)`-th coefficient in the matrix is `autocov(G1[i], G2[j])`.
+"""
 covmat(X::StochasticProcess, G1::AbstractVector, G2::AbstractVector) = autocov!(zeros(length(G1), length(G2)), X, G1, G2)
 
+"""
+Return the auto-covarince matrix of a stochastic process on an integer sampling grid.
+"""
 covmat(X::StochasticProcess, N::Integer) = covmat(X, 1:N)
 covmat(X::StochasticProcess, N::Integer, M::Integer) = covmat(X, 1:N, 1:M)
 
 
 """
-Return the partial correlation function of a stationary process.
+Return the partial correlation function of a discrete time stationary process.
 """
 partcorr(X::DiscreteTimeStationaryProcess, n::DiscreteTime) = throw(NotImplementedError())
 
 
 """
-Compute the partial correlation sequence of a stationary process for a range of index.
+Compute the partial correlation sequence of a discrete time stationary process on a regular integer sampling grid.
 """
 function partcorr!(C::Vector{<:AbstractFloat}, X::DiscreteTimeStationaryProcess, G::AbstractVector{<:DiscreteTime})
     # check dimension
@@ -246,11 +262,13 @@ end
 
 
 """
-Return the partial correlation function of a stationary process for a range of index.
-If `ld==true` use the Levinson-Durbin method which needs only the autocovariance function of the process.
+Return the partial correlation function of a time discrete stationary process.
+
+# Args
+- method: if set to `:LevinsonDurbin` it will use the Levinson-Durbin method which needs only the autocovariance expression of the process.
 """
-function partcorr(X::StationaryProcess, G::AbstractVector, ld::Bool=false)
-    if ld  # use Levinson-Durbin
+function partcorr(X::DiscreteTimeStationaryProcess, G::AbstractVector{<:DiscreteTime}, method::Symbol=:None)
+    if method == :LevinsonDurbin # use Levinson-Durbin
         cseq = covseq(X, G)
         pseq, sseq, rseq = LevinsonDurbin(cseq)
         return rseq
@@ -296,6 +314,6 @@ end
 cond_mean_cov(P::StochasticProcess, gx::ContinuousTime, Gy::AbstractVector, Y::AbstractVector) = cond_mean_cov(P, [gx], Gy, Y)
 
 
-include("FBM.jl")
-include("MFBM.jl")
-include("FARIMA.jl")
+include("FBM.jl")  # Fractional Brownian Motion related
+include("MFBM.jl")  # Multi-Fractional Brownian Motion related
+include("FARIMA.jl")  # Fractional ARIMA related

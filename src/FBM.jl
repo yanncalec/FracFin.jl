@@ -92,7 +92,7 @@ Kpmm(x, t, H) = Kplus(x, t, H) - Kminus(x, t, H)
 Fractional Gaussian noise (fGn) is the discrete time version of the continuous time differential process of a fBm: `B(t+δ) - B(t)`.  It is defined as `B(n+l) - B(n)`, where `l` is the lag.
 
 # Note
-- The definition here is the anticausal version.
+- We adopt the anti-causal convention in the definition here.
 """
 struct FractionalGaussianNoise <: IncrementProcess{FractionalBrownianMotion}
     parent_process::FractionalBrownianMotion
@@ -120,9 +120,9 @@ end
 
 
 """
-Covariance matrix of fGn.
+Covariance matrix of standard (continuous time) fGn.
 
-For discrete regular grid this is equivalent to `covmat(FractionalGaussianNoise(H), 1:N, 1:M)`.
+The special case of discrete regular grids with integer lag `d` is equivalent to `covmat(FractionalGaussianNoise(H, d), 1:N, 1:M)`.
 """
 function fGn_covmat(G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, H::Real, δ::Real)
     Σ = zeros(length(G1),length(G2))
@@ -156,4 +156,43 @@ ss_exponent(X::FractionalWaveletNoise) = X.parent_process.hurst
 
 filter(X::FractionalWaveletNoise) = X.filter
 
+#### TODO : fWn ####
+
 fWn_autocov = () -> NaN
+
+
+"""
+Compute the covariance matrix of a fWn at some time lag.
+
+# Args
+- F: array of band pass filters (no DC component)
+- d: time lag
+- H: Hurst exponent
+"""
+function fWn_covmat_lag(F::AbstractVector{<:AbstractVector{T}}, d::Int, H::Real) where {T<:Real}
+    L = maximum([length(f) for f in F])  # maximum length of filters
+    # M = [abs(d+(n-m))^(2H) for n=0:L-1, m=0:L-1]  # matrix comprehension is ~ 10x slower
+    M = zeros(L,L)
+    for n=1:L, m=1:L
+        M[n,m] = abs(d+(n-m))^(2H)
+    end
+    Σ = -1/2 * [f' * view(M, 1:length(f), 1:length(g)) * g for f in F, g in F]
+end
+
+
+"""
+Compute the covariance matrix of a time-concatenated fWn.
+"""
+function fWn_covmat(F::AbstractVector{<:AbstractVector{T}}, lmax::Int, H::Real) where {T<:Real}
+    J = length(F)
+    Σ = zeros(((lmax+1)*J, (lmax+1)*J))
+    Σs = [fWn_covmat_lag(F, d, H) for d = 0:lmax]
+
+    for r = 0:lmax
+        for c = 0:lmax
+            Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (c>=r) ? Σs[c-r+1] : transpose(Σs[r-c+1])
+        end
+    end
+
+    return Matrix(Symmetric(Σ))  #  forcing symmetry
+end
