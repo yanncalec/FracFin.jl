@@ -8,8 +8,8 @@ using StatsBase
 using Formatting
 
 import Base: rand, length, size, show, promote_rule, binomial
-import StatsBase: autocov!, autocov
-import Statistics: mean, cov
+import StatsBase: autocov!, autocov, AbstractWeights, mean, cov
+# import Statistics: mean, cov
 
 import SpecialFunctions: gamma, lgamma
 
@@ -46,10 +46,10 @@ for ErrType in [:NotImplementedError, :ValueError]
     @eval begin
         struct $ErrType <: Exception
             errmsg::AbstractString
-                
+
             $ErrType(msg::AbstractString="") = new(msg)
         end
-        show(io::IO, exc::$ErrType) = print(io, string("$ErrType: ",exc.errmsg))        
+        show(io::IO, exc::$ErrType) = print(io, string("$ErrType: ",exc.errmsg))
     end
 end
 
@@ -80,6 +80,7 @@ include("Tool.jl")
 include("CHA.jl")
 include("Stat.jl")
 include("Estimator.jl")
+include("Rolling.jl")
 include("Trading.jl")
 
 end # module

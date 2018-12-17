@@ -1,62 +1,6 @@
 ########## Utility functions ##########
 
-#### Rolling window ####
-
-"""
-Apply a function on a rolling window with hard truncation at boundaries.
-
-# Args
-- func: function to be applied, taking matrix as input and returning a vector or a scalar
-- X0: input data, vector or matrix. For matrix the rolling window runs through the row direction (i.e. horizontally, each column corresponds to a time)
-- s: size of rolling window
-- d: step of rolling window
-- mode: :causal or :anticausal
-
-# Returns
-- a matrix or a row vector
-"""
-function rolling_apply_hard(func::Function, X0::AbstractVecOrMat{T}, s::Int, d::Int=1; mode::Symbol=:causal) where {T<:Number}
-    # @assert s>0
-    X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
-    L = size(X,2)
-    return if mode==:causal
-        hcat(reverse([func(X[:,t-s+1:t]) for t=L:-d:s])...)
-    else  # anti-causal
-        hcat([func(X[:,t:t+s-1]) for t=1:d:L-s+1]...)
-    end
-end
-
-"""
-Apply a function on a rolling window with soft truncation at boundaries.
-"""
-function rolling_apply_soft(func::Function, X0::AbstractVecOrMat{T}, s::Int, d::Int=1; mode::Symbol=:causal) where {T<:Number}
-    # @assert s>0
-    X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
-    L = size(X,2)
-    return if mode==:causal
-        hcat(reverse([func(X[:,max(1,t-s+1):t]) for t=L:-d:1])...)
-    else  # anti-causal
-        hcat([func(X[:,t:min(L,t+s-1)]) for t=1:d:L]...)
-    end
-end
-
-
-"""
-    rolling_vectorize(X0::AbstractVecOrMat{T}, w::Int, d::Int=1) where {T<:Real}
-
-Rolling vectorization.
-
-# Args
-- X0: real vector or matrix
-- w: size of rolling window
-- d: step of rolling window
-"""
-function rolling_vectorize(X0::AbstractVecOrMat{T}, w::Int, d::Int=1) where {T<:Number}
-    return rolling_apply_hard(x->vec(x), X0, w, d)
-end
-
-
-##### Useful functions #####
+##### Algebra #####
 
 function shrinkage_by_value(X0::AbstractArray{T}, v::T, mode::Symbol=:soft) where {T<:Number}
     X1 = fill(zero(T), size(X0))  # or zero(X0)
@@ -137,7 +81,6 @@ function vec2mat(x::AbstractVector{T}, r::Int) where {T<:Real}
     return reshape(x[1:n], r, :)
 end
 
-##### Algebra #####
 
 function norm(X::AbstractMatrix{T}, p::Real=2; dims::Int=1) where {T<:Number}
     if dims==1
@@ -261,6 +204,13 @@ function lagdiff(X::AbstractVecOrMat{<:Number}, d::Int, mode::Symbol=:causal)
     return (mode==:causal) ? dX : circshift(dX, -d)
 end
 
+function lagdiff(X::AbstractVector{<:Number}, dlags::AbstractVector{<:Integer}, mode::Symbol=:causal)
+    return hcat([lagdiff(X, d, :causal) for d in dlags]...)
+end
+
+function lagdiff(X::AbstractMatrix{<:Number}, dlags::AbstractVector{<:Integer}, mode::Symbol=:causal)
+    return reshape(hcat([lagdiff(X, d, :causal) for d in dlags]...), (size(X,1),:,length(dlags)))
+end
 
 ###### Time series manipulation ######
 

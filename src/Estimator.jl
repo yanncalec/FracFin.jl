@@ -1,46 +1,178 @@
 ######### Estimators for fBm and related processes #########
 
 ###### Power law ######
+
+# function moment_incr(X::AbstractVector{T}, d::Integer, p::Real, w::StatsBase.AbstractWeights)
+#     mean((abs.(X[d+1:end] - X[1:end-d])).^p, w)
+# end
+
+# moment_incr(X, d, p) = moment_incr(X, d, p, StatsBase.weights(ones(length(X)-d)))
+
 """
 Compute the p-th moment of the increment of time-lag `d` of a 1d array.
 """
-moment_incr(X,d,p) = mean((abs.(X[d+1:end] - X[1:end-d])).^p)
+function moment_incr(X::AbstractVecOrMat{<:Real}, d::Integer, p::Real, k::Int=0)
+    dX = X[d+1:end] - X[1:end-d]
+    return if k==0  # q is the order of polynomial weight
+        mean((abs.(dX)).^p)
+    else
+        w = StatsBase.weights(causal_weight(length(dX), k))
+        mean((abs.(dX)).^p, w)
+    end
+    # median((abs.(dX)).^p)
+end
+
+
+function moment(X::AbstractVecOrMat{<:Real}, d::Integer, p::Real, k::Int=0)
+    w = StatsBase.weights(causal_weight(length(dX), k))
+    μX = mean(X, w, dims=1)
+    return mean((abs.(X.-μX)).^p, w)
+    # return median((abs.(X.-μX)).^p, w)
+end
+
+
+# function powlaw_estim(X::AbstractVector{<:AbstractVector{<:Real}}, lags::AbstractVector{<:Integer}, p::Real=2.; kwargs...)
+#     powlaw_estim(hcat(X...), lags, p; kwargs...)
+# end
+
+function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}, p::Real=2.; kt::Integer=1, ks::Integer=0, q::Real=2., ε::Real=1e-2)
+    @assert length(lags) == size(X,1)
+    @assert length(lags) > 1 && all(lags .>= 1)
+    @assert p > 0.
+
+    cp = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)  # constant depending on p
+
+    # observation and explanatory vectors
+    wt = StatsBase.weights(causal_weight(size(X,2), kt))
+    μX = mean(X, wt, 2)
+    yp = vec(log.(mean((abs.(X.-μX)).^p, wt, 2)))
+    # yp = vec(mean((abs.(X)).^p, wt, 2))
+    xp = p * log.(lags)
+    # weight for scales
+    ws = StatsBase.weights(poly_weight(length(yp), ks))
+
+    yc = yp .- mean(yp, ws)
+    xc = xp .- mean(xp, ws)
+    # func = h -> 1/2 * sum((yc - h*xc).^2)
+    func = h -> 1/2 * sum(ws .* abs.(yc - h*xc).^q)
+    # func = h -> 1/2 * mean(abs.(yc - h*xc).^q, ws)
+
+    # estimation of H and η
+    # Gradient-free constrained optimization
+    opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+    # # Gradient-based optimization
+    # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+    # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+    hurst = Optim.minimizer(opm)[1]
+    η = mean(yp - hurst*xp, ws)
+
+    # # by manual inversion
+    # Ap = hcat(xp, ones(length(xp))) # design matrix
+    # hurst, β = Ap \ yp
+    # # or by GLM
+    # dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
+    # opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
+    # η, hurst = GLM.coef(opm)
+
+    σ = exp((η-log(cp))/p)
+
+    return hurst, σ, opm
+end
+const fBm_powlaw_estim = powlaw_estim
+
+
+
+"""
+"""
+function powlaw_estim_predict(X::AbstractMatrix{<:Real}, dlags::AbstractVector{<:Integer}, dlag::Integer, p::Real, plen::Integer, plag::Integer; kwargs...)
+    (H, σ), opm = FracFin.powlaw_estim(X, dlags, p; kwargs...)
+    dX0 = X[dlag+1:end] - X[1:end-dlag]
+    # dX = view(dX0, length(dX0)-plen+1:length(dX0))
+    pidx = reverse(length(dX0):-dlag:1)[end-plen+1:end]
+    dX = dX0[pidx]
+    # println(length(dX)+dlag)
+    # println(length(X))
+    μc, Σc = cond_mean_cov(FractionalGaussianNoise(H, dlag), length(dX)+1:length(dX)+plag, pidx, dX)
+    return H, σ, μc, σ^2 * Σc
+end
+
 
 """
 Power-law estimator for Hurst exponent and volatility.
 
+Y = (y_k)_k, with y_k := 𝐄[|Δ_{kδ} B^{H}(t)|^p]
+X = (x_k)_k, with x_k := p * log(k)
+
 # Args
-- X: sample path
-- lags: array of the increment step
-- p: power
+- X: sample path of fBm
+- lags: array of the increment step, or scale
+- p: power of the moment
+- kt: polynomial order of the weight for samples, if 0 the uniform weight is used
+- ɛ: search hurst in the interval [ɛ, 1-ɛ]
+- ks: polynomial order of the weight for scales, if 0 the uniform weight is used
+- q: power of the objective function
 
 # Returns
-- (hurst, σ), ols: estimation of Hurst and volatility, as well as the GLM ols object.
+- (hurst, σ), obj: estimation of Hurst and volatility, as well as an object of optimizer.
 """
-function powlaw_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, p::Real=2.) where {T<:Real}
+function powlaw_estim(X::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}, p::Real=2.; kt::Integer=1, ks::Integer=0, q::Real=2., ε::Real=1e-2)
     @assert length(lags) > 1 && all(lags .>= 1)
     @assert p > 0.
 
-    C = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
+    cp = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)  # constant depending on p
 
-    yp = map(d -> log(moment_incr(X, d, p)), lags)
+    # observation and explanatory vectors
+    yp = map(d -> log(moment_incr(X, d, p, kt)), lags)
     xp = p * log.(lags)
 
-    # estimation of H and β
-    # by manual inversion
+    # weight for scales
+    # wj = length(wj) < length(yp) ? StatsBase.weights(ones(length(yp))/length(yp)) : StatsBase.weights(wj/sum(wj))
+    # # @assert all(wj .>= 0)
+    w = StatsBase.weights(poly_weight(length(yp), ks))
+
+    yc = yp .- mean(yp, w)
+    xc = xp .- mean(xp, w)
+    # func = h -> 1/2 * sum(w .* (yc - h*xc).^2)
+    func = h -> 1/2 * mean((yc - h*xc).^2, w)
+    # func = h -> 1/2 * mean(abs.(yc - h*xc).^q, W)
+
+    # estimation of H and η
+    # Gradient-free constrained optimization
+    opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+    # # Gradient-based optimization
+    # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+    # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+    hurst = Optim.minimizer(opm)[1]
+    η = mean(yp - hurst*xp, w)
+
+    # # by manual inversion
     # Ap = hcat(xp, ones(length(xp))) # design matrix
     # hurst, β = Ap \ yp
-    # or by GLM
+    # # or by GLM
+    # dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
+    # opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
+    # η, hurst = GLM.coef(opm)
 
-    dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
-    ols = GLM.lm(@GLM.formula(yvar~xvar), dg)
-    β, hurst = GLM.coef(ols)
+    σ = exp((η-log(cp))/p)
 
-    σ = exp((β-log(C))/p)
-
-    return (hurst, σ), ols
+    return (hurst, σ), opm
 end
 const fBm_powlaw_estim = powlaw_estim
+
+
+"""
+"""
+function powlaw_estim_predict(X::AbstractVector{<:Real}, dlag::Integer, Δ::Integer, p::Real, plen::Integer, plag::Integer; kwargs...)
+    (H, σ), opm = FracFin.powlaw_estim(X, dlag-Δ:dlag+Δ, p; kwargs...)
+    dX0 = X[dlag+1:end] - X[1:end-dlag]
+    # dX = view(dX0, length(dX0)-plen+1:length(dX0))
+    pidx = reverse(length(dX0):-dlag:1)[end-plen+1:end]
+    dX = dX0[pidx]
+    # println(length(dX)+dlag)
+    # println(length(X))
+    μc, Σc = cond_mean_cov(FractionalGaussianNoise(H, dlag), length(dX)+1:length(dX)+plag, pidx, dX)
+    return H, σ, μc, σ^2 * Σc
+end
 
 
 ####### Generalized scalogram #######
@@ -201,12 +333,19 @@ function log_likelihood_H(A::AbstractMatrix{T}, X::AbstractVecOrMat{T}, ε::Real
 end
 
 
+"""
+Log-likelihood of a general Gaussian vector.
+
+# Args
+- A: covariance matrix
+- X: sample vector or matrix, each column is one observation.
+"""
 function log_likelihood(A::AbstractMatrix{T}, X::AbstractVecOrMat{T}) where {T<:Real}
     @assert issymmetric(A)
     @assert size(X, 1) == size(A, 1)
 
-    N = ndims(X)>1 ? size(X,2) : 1
-    # d = size(X,1), # such that N*d == length(X)
+    N = ndims(X)>1 ? size(X,2) : 1  # number of observations
+    # d = size(X,1), # dimension of the vector, such that N*d == length(X)
 
     return -1/2 * (N*logdet(A) + xiAx(A,X) + length(X)*log(2π))
 end

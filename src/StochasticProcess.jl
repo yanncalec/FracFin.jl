@@ -123,7 +123,7 @@ isstationary(X::StationaryProcess) = true
 Determine whether a grid has the constant step.
 """
 function isregulargrid(G::AbstractVector)
-    return if length(G) == 2
+    return if length(G) <= 2
         true
     elseif length(G) > 2  # second order difference should be close to 0
         isapprox(maximum(abs.(diff(diff(G)))), 0.0; atol=1e-10)
@@ -300,9 +300,9 @@ end
 #### Statistical inference on stochastic process ####
 
 """
-Conditional mean and covariance of a Gaussian process `P` on the position `Gx` given the value `Y` on the postion `Gy`.
+Conditional mean and covariance of a zero-mean Gaussian process `P` on the position `Gx` given the value `Y` on the postion `Gy`.
 """
-function cond_mean_cov(P::StochasticProcess{T}, Gx::AbstractVector{T}, Gy::AbstractVector{T}, Y::AbstractVector{<:Real}) where T<:TimeStyle
+function cond_mean_cov(P::StochasticProcess{T}, Gx::AbstractVector{<:T}, Gy::AbstractVector{<:T}, Y::AbstractVector{<:Real}) where T<:TimeStyle
     @assert length(Gy) == length(Y)
 
     Σxx = covmat(P, Gx)

@@ -370,7 +370,7 @@ function main()
         Hs = fill(NaN, length(Tt)); Hs[tidx] = std(Hm, dims=1)[:]
         σs = fill(NaN, length(Tt)); σs[tidx] = std(σm, dims=1)[:]
 
-        At = TimeSeries.TimeArray(Tt, [Xt Ht Hs σt σs], ["Log_Price", "Hurst", "Hurst_std", "σ", "σ_std"])
+        At = TimeSeries.TimeArray(Tt, [Xt Ht Hs σt σs], Symbol.(["Log_Price", "Hurst", "Hurst_std", "σ", "σ_std"]))
 
         # make the output folder
         outdir = format("{}/{}/{}/{}/{}/", outdir0, sname, cname, cmd, outstr)
