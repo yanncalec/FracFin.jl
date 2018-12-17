@@ -40,10 +40,10 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
     # yp = vec(log.(mean((abs.(X)).^p, wt, 2)))  # <- this gives lower SNR
     xp = p * log.(lags)
     
+    # Estimation method 1: optimization
     # weight for scales
     ks::Integer = 0  # polynomial order of the weight for scales, if 0 the uniform weight is used
-    ws = StatsBase.weights(poly_weight(length(yp), ks))
-    
+    ws = StatsBase.weights(poly_weight(length(yp), ks))    
     yc = yp .- mean(yp, ws)
     xc = xp .- mean(xp, ws)
     func = h -> 1/2 * sum(ws .* (yc - h*xc).^2)
@@ -59,6 +59,7 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
     hurst = Optim.minimizer(opm)[1]
     η = mean(yp - hurst*xp, ws)
 
+    # # Estimation method 2: linear regression
     # # by manual inversion
     # Ap = hcat(xp, ones(length(xp))) # design matrix
     # hurst, β = Ap \ yp
@@ -77,16 +78,28 @@ const fBm_powlaw_estim = powlaw_estim
 
 """
 # Args
-- (l,d,n): index of scale, downsampling factor and number of samples
+- s: index of working scale
+- d: average downsampling factor
 - k: steps of prediction in the future
+
+# Notes
+- This function is intended to be used with `rolling_apply` where `X` is some observation on a time window. - The time arrow is on the second dimension (i.e. horizontal) from left to right.
 """
-function powlaw_estim_predict(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}, p::Real, (l,d,n)::Tuple{Integer,Integer,Integer}, k::Integer; kwargs...)
-    # @assert k>0
-    # @assert d>0 && n>0
-    @assert (n-1)*d <= size(X,2)
+function powlaw_estim_predict(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}, p::Real, s::Integer, d::Integer, k::Integer; kwargs...)
+    # @assert k>0 && d>0
+
+    # println("l=$l, d=$d")
     H, σ, opm = FracFin.powlaw_estim(X, lags, p; kwargs...)
-    tidx = reverse(view(size(X,2):-d:1, 1:n))
-    μc, Σc = cond_mean_cov(FractionalGaussianNoise(H, lags[l]), tidx[end]+1:tidx[end]+k, tidx, X[l,tidx])
+
+    # convention of time arrow: from left to right
+    # tidx = reverse(size(X,2):-d:1)
+    tidx = findall(reverse(logtrain(size(X,2), size(X,2)÷d)))    
+    xm = X[s,tidx]
+
+    # xm = transpose(vec2mat(X[s,:], d, keep=:tail))
+    # tidx = d*(1:size(xm,1))
+
+    μc, Σc = cond_mean_cov(FractionalGaussianNoise(H, lags[s]), tidx[end]+1:tidx[end]+k, tidx, xm)
     return H, σ, μc, σ^2 * Σc  # <- adding mean(X[l,tidx]) to μc won't help
 end
 

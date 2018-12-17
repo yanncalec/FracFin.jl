@@ -10,6 +10,18 @@ function common_elements(tx::AbstractVector, ty::AbstractVector)
     return idx, idy
 end
 
+
+"""
+Spike train with logarithmic density.
+"""
+function logtrain(w::Integer, n::Integer)
+    V = floor.(Int, w.^((0:n-1)./n))
+    U = zeros(Bool, w)
+    U[V] .= true
+    return U
+end
+
+
 ##### Algebra #####
 
 function shrinkage_by_value(X0::AbstractArray{T}, v::T, mode::Symbol=:soft) where {T<:Number}
@@ -81,14 +93,18 @@ iceil(x::Int, y::Int) = ceil(Int, x/y) * y
 
 
 """
-    vec2mat(x::AbstractVector{T}, r::Int) where {T<:Real}
-
 Reshape a vector `x` to a matrix of `r` rows with truncation if `length(x)` does not divide `r`.
 """
-function vec2mat(x::AbstractVector{T}, r::Int) where {T<:Real}
+function vec2mat(x::AbstractVector{T}, r::Int; keep::Symbol=:tail) where {T<:Real}
     @assert r<=length(x)  # number of row must be smaller than the size of x
     n = length(x) - (length(x)%r)
-    return reshape(x[1:n], r, :)
+    return if keep == :head
+        reshape(x[1:n], r, :)
+    elseif keep == :tail
+        reshape(x[end-n+1:end], r, :)
+    else
+        error("Unknown position: $(keep)")
+    end
 end
 
 

@@ -200,10 +200,14 @@ covseq(X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle = aut
 function autocov!(C::Matrix{<:AbstractFloat}, X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle
     # check dimension
     @assert size(C, 1) == size(C, 2) == length(G)
+    # println("autocov! of StationaryProcess, $(ss_exponent(X))")
 
-    # construct the covariance matrix (a Toeplitz matrix)
-    N = size(C, 1)
-    return covmat!(C, covseq(X,G))
+    return if isregulargrid(G)
+        # construct the covariance matrix (a Toeplitz matrix)
+        covmat!(C, covseq(X,G))
+    else  # if G is not regular the `covseq` can not be applied, invoke the super function.
+        invoke(autocov!, Tuple{Matrix{<:AbstractFloat}, StochasticProcess{S}, AbstractVector{<:S}} where S<:TimeStyle, C, X, G)
+    end
 end
 
 
@@ -300,23 +304,33 @@ end
 #### Statistical inference on stochastic process ####
 
 """
-Conditional mean and covariance of a zero-mean Gaussian process `P` on the position `Gx` given the value `Y` on the postion `Gy`.
-"""
-function cond_mean_cov(P::StochasticProcess{T}, Gx::AbstractVector{<:T}, Gy::AbstractVector{<:T}, Y::AbstractVector{<:Real}) where T<:TimeStyle
-    @assert length(Gy) == length(Y)
+Conditional mean and covariance of a zero-mean Gaussian process `P` on the position `Gx` given the value `Y` on the position `Gy`.
 
+# Args
+- Y: vector or matrix. For matrix case the columns are i.i.d. observations.
+"""
+function cond_mean_cov(P::StochasticProcess{T}, Gx::AbstractVector{<:T}, Gy::AbstractVector{<:T}, Y::AbstractVecOrMat{<:Real}) where T<:TimeStyle
+    @assert length(Gy) == size(Y,1)
+    
     Σxx = covmat(P, Gx)
     Σxy = covmat(P, Gx, Gy)
     Σyy = covmat(P, Gy)
-
-    iΣyy = pinv(Σyy) 
-    # μc = Σxy * (Σyy\Y)
-    μc = Σxy * iΣyy * Y
+    
+    iΣyy = pinv(Matrix(Σyy)) 
     Σc = Σxx - Σxy * iΣyy * Σxy'
+    
+    μc = if ndims(Y) == 1 
+        # Σxy * (Σyy\Y)
+        Σxy * iΣyy * Y
+    else  # take mean if multiple observations are given
+        mean([Σxy * iΣyy * Y[:,n] for n=1:size(Y,2)])
+    end
+    
     return μc, Σc
 end
 
 cond_mean_cov(P::StochasticProcess, gx::ContinuousTime, Gy::AbstractVector, Y::AbstractVector) = cond_mean_cov(P, [gx], Gy, Y)
+
 
 
 include("FBM.jl")  # Fractional Brownian Motion related
