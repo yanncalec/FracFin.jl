@@ -141,13 +141,14 @@ fGn_covmat(N::Integer, H::Real, d::Integer) = fGn_covmat(1:N, H, d)
 """
 Fractional Wavelet noise.
 
-fWn is the process resulting from the filtering of a fBm by a wavelet.
+fWn is the wavelet-filtered process of fBm.
 """
 struct FractionalWaveletNoise <: FilteredProcess{ContinuousTime, FractionalBrownianMotion}
     parent_process::FractionalBrownianMotion
     filter::AbstractVector
 
     function FractionalWaveletNoise(hurst::Real, filter::AbstractVector{<:Real})
+        @assert isapprox(sum(filter), 0.; atol=1e-10)  # filter must be high pass
         new(FractionalBrownianMotion(hurst), filter)
     end
 end
@@ -169,7 +170,7 @@ Compute the covariance matrix of a fWn at some time lag.
 - d: time lag
 - H: Hurst exponent
 """
-function fWn_covmat_lag(F::AbstractVector{<:AbstractVector{T}}, d::Int, H::Real) where {T<:Real}
+function fWn_covmat_lag(F::AbstractVector{<:AbstractVector{T}}, d::DiscreteTime, H::Real) where {T<:Real}
     L = maximum([length(f) for f in F])  # maximum length of filters
     # M = [abs(d+(n-m))^(2H) for n=0:L-1, m=0:L-1]  # matrix comprehension is ~ 10x slower
     M = zeros(L,L)

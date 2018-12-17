@@ -31,7 +31,7 @@ and the anti-causal version:
     \sum_{n=0}^{N-1} a[n+1] X(t+nδ)
 
 # Note
-- Under the stationarity assumption the causality has no effect on the auto-covariance function.
+- Under assumption of stationarity, the causality has no effect on the auto-covariance function. The implementation of concrete type should follow the anti-causal convention.
 - The aimed concrete type of the abstract type `IncrementProcess` is `FractionalGaussianNoise` (fGn) which is stationary. However due to the lack of multiple inheritance in Julia it is very hard to make `IncrementProcess` a subtype of `StationaryProcess`. Possible solutions to this problem include 1) SimpleTrait.jl,  2) copy functions defined for `StationaryProcess`,  3) force `FilteredProcess` to be a subtype of `StationaryProcess`. We adopt the solution 3) here.
 """
 abstract type FilteredProcess{T<:TimeStyle, P<:StochasticProcess{>:T}} <: StationaryProcess{T} end
@@ -308,7 +308,12 @@ function cond_mean_cov(P::StochasticProcess{T}, Gx::AbstractVector{<:T}, Gy::Abs
     Σxx = covmat(P, Gx)
     Σxy = covmat(P, Gx, Gy)
     Σyy = covmat(P, Gy)
-    return  Σxy * (Σyy\Y), Σxx - Σxy * inv(Σyy) * Σxy'
+
+    iΣyy = pinv(Σyy) 
+    # μc = Σxy * (Σyy\Y)
+    μc = Σxy * iΣyy * Y
+    Σc = Σxx - Σxy * iΣyy * Σxy'
+    return μc, Σc
 end
 
 cond_mean_cov(P::StochasticProcess, gx::ContinuousTime, Gy::AbstractVector, Y::AbstractVector) = cond_mean_cov(P, [gx], Gy, Y)

@@ -1,5 +1,15 @@
 ########## Utility functions ##########
 
+"""
+Return indexes of common elements of two vectors.
+"""
+function common_elements(tx::AbstractVector, ty::AbstractVector)
+    tc = intersect(tx, ty)
+    idx = vcat([findall(t.==tx) for t in tc]...)
+    idy = vcat([findall(t.==ty) for t in tc]...)
+    return idx, idy
+end
+
 ##### Algebra #####
 
 function shrinkage_by_value(X0::AbstractArray{T}, v::T, mode::Symbol=:soft) where {T<:Number}

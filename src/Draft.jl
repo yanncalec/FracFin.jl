@@ -655,3 +655,93 @@ function rolling_regress_predict(regressor::Function, predictor::Function, X0::A
     return res
 end
 
+
+
+
+# function moment_incr(X::AbstractVector{T}, d::Integer, p::Real, w::StatsBase.AbstractWeights)
+#     mean((abs.(X[d+1:end] - X[1:end-d])).^p, w)
+# end
+
+# moment_incr(X, d, p) = moment_incr(X, d, p, StatsBase.weights(ones(length(X)-d)))
+
+"""
+Compute the p-th moment of the increment of time-lag `d` of a 1d array.
+"""
+function moment_incr(X::AbstractVecOrMat{<:Real}, d::Integer, p::Real, k::Int=0)
+    dX = X[d+1:end] - X[1:end-d]
+    return if k==0  # q is the order of polynomial weight
+        mean((abs.(dX)).^p)
+    else
+        w = StatsBase.weights(causal_weight(length(dX), k))
+        mean((abs.(dX)).^p, w)
+    end
+    # median((abs.(dX)).^p)
+end
+
+
+function moment(X::AbstractVecOrMat{<:Real}, d::Integer, p::Real, k::Int=0)
+    w = StatsBase.weights(causal_weight(length(dX), k))
+    μX = mean(X, w, dims=1)
+    return mean((abs.(X.-μX)).^p, w)
+    # return median((abs.(X.-μX)).^p, w)
+end
+
+
+function powlaw_estim(X::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}, p::Real=2.; kt::Integer=1, ks::Integer=0, q::Real=2., ε::Real=1e-2)
+    @assert length(lags) > 1 && all(lags .>= 1)
+    @assert p > 0.
+
+    cp = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)  # constant depending on p
+
+    # observation and explanatory vectors
+    yp = map(d -> log(moment_incr(X, d, p, kt)), lags)
+    xp = p * log.(lags)
+
+    # weight for scales
+    # wj = length(wj) < length(yp) ? StatsBase.weights(ones(length(yp))/length(yp)) : StatsBase.weights(wj/sum(wj))
+    # # @assert all(wj .>= 0)
+    w = StatsBase.weights(poly_weight(length(yp), ks))
+
+    yc = yp .- mean(yp, w)
+    xc = xp .- mean(xp, w)
+    # func = h -> 1/2 * sum(w .* (yc - h*xc).^2)
+    func = h -> 1/2 * mean((yc - h*xc).^2, w)
+    # func = h -> 1/2 * mean(abs.(yc - h*xc).^q, W)
+
+    # estimation of H and η
+    # Gradient-free constrained optimization
+    opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+    # # Gradient-based optimization
+    # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+    # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+    hurst = Optim.minimizer(opm)[1]
+    η = mean(yp - hurst*xp, w)
+
+    # # by manual inversion
+    # Ap = hcat(xp, ones(length(xp))) # design matrix
+    # hurst, β = Ap \ yp
+    # # or by GLM
+    # dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
+    # opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
+    # η, hurst = GLM.coef(opm)
+
+    σ = exp((η-log(cp))/p)
+
+    return (hurst, σ), opm
+end
+const fBm_powlaw_estim = powlaw_estim
+
+
+"""
+"""
+function powlaw_estim_predict(X::AbstractVector{<:Real}, dlag::Integer, Δ::Integer, p::Real, plen::Integer, plag::Integer; kwargs...)
+    (H, σ), opm = FracFin.powlaw_estim(X, dlag-Δ:dlag+Δ, p; kwargs...)
+    dX0 = X[dlag+1:end] - X[1:end-dlag]
+    # dX = view(dX0, length(dX0)-plen+1:length(dX0))
+    pidx = reverse(length(dX0):-dlag:1)[end-plen+1:end]
+    dX = dX0[pidx]
+    # println(length(dX)+dlag)
+    # println(length(X))
+    μc, Σc = cond_mean_cov(FractionalGaussianNoise(H, dlag), length(dX)+1:length(dX)+plag, pidx, dX)
+    return H, σ, μc, σ^2 * Σc
+end

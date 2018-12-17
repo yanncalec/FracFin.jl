@@ -9,9 +9,6 @@ Apply a function on a rolling window with hard truncation at boundaries.
 - s: size of rolling window
 - d: step of rolling window
 - mode: :causal or :anticausal
-
-# Returns
-- a matrix or a row vector
 """
 function rolling_apply_hard(func::Function, X::AbstractVector, s::Int, d::Int=1; mode::Symbol=:causal)
     # @assert s>0
