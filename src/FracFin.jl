@@ -6,6 +6,7 @@ using LinearAlgebra
 using Statistics
 using StatsBase
 using Formatting
+# using Documenter
 
 import Base: rand, length, size, show, promote_rule, binomial
 import StatsBase: autocov!, autocov, AbstractWeights, mean, cov

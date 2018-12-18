@@ -177,9 +177,8 @@ end
 Compute the auto-covarince sequence of a stationary process on a regular grid.
 """
 function autocov!(C::AbstractVector{<:AbstractFloat}, X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle
-    # check dimension
-    @assert length(C) == length(G)
-    @assert isregulargrid(G)
+    # @assert isregulargrid(G)    
+    @assert length(C) == length(G)  # check dimension
 
     # construct the auto-covariance kernel
     for n = 1:length(C)
@@ -205,7 +204,7 @@ function autocov!(C::Matrix{<:AbstractFloat}, X::StationaryProcess{T}, G::Abstra
     return if isregulargrid(G)
         # construct the covariance matrix (a Toeplitz matrix)
         covmat!(C, covseq(X,G))
-    else  # if G is not regular the `covseq` can not be applied, invoke the super function.
+    else  # if G is not regular the `covseq` can not be applied, invoke the function of `StochasticProcess`.
         invoke(autocov!, Tuple{Matrix{<:AbstractFloat}, StochasticProcess{S}, AbstractVector{<:S}} where S<:TimeStyle, C, X, G)
     end
 end
@@ -331,6 +330,33 @@ end
 
 cond_mean_cov(P::StochasticProcess, gx::ContinuousTime, Gy::AbstractVector, Y::AbstractVector) = cond_mean_cov(P, [gx], Gy, Y)
 
+
+"""
+EXPERIMENTAL: linear coefficient of recursive conditional mean
+
+Predict `k` steps into the future.
+"""
+function cond_mean_coeff(P::StochasticProcess{T}, k::Integer, l::Integer; mode::Symbol=:recursive) where T<:TimeStyle
+    @assert k>0
+
+    Σyy = covmat(P, 0:l-1)
+
+    if mode == :recursive
+        Σxy = covmat(P, [l], 0:l-1)
+        cv = Σxy * pinv(Matrix(Σyy))
+        M = vcat(diagm(1 => ones(l-1))[1:l-1,:], cv)
+        Cv = [cv]
+
+        for i=2:k
+            push!(Cv, Cv[end]*M)
+        end
+    
+        return vcat(Cv...)
+    else
+        Cv = covmat(P, l:l+k-1, 0:l-1) * pinv(Matrix(Σyy))
+        return Cv
+    end    
+end
 
 
 include("FBM.jl")  # Fractional Brownian Motion related

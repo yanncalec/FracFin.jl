@@ -101,6 +101,25 @@ function powlaw_estim_predict(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:
 
     μc, Σc = cond_mean_cov(FractionalGaussianNoise(H, lags[s]), tidx[end]+1:tidx[end]+k, tidx, xm)
     return H, σ, μc, σ^2 * Σc  # <- adding mean(X[l,tidx]) to μc won't help
+
+    
+end
+
+
+"""
+EXPERIMENTAL: prediction by recursive conditional mean
+
+No visible improvements over classical conditional mean for long range prediction.
+"""
+function powlaw_estim_predict(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}, p::Real, s::Integer, k::Integer; kwargs...)
+    # @assert k>0 && d>0
+
+    H, σ, opm = FracFin.powlaw_estim(X, lags, p; kwargs...)
+    l = size(X,2)÷4
+    Cv = cond_mean_coeff(FractionalGaussianNoise(H, lags[s]), k, l)
+    μc = Cv * X[s, end-l+1:end]
+    
+    return H, σ, μc
 end
 
 

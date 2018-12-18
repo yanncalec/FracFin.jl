@@ -109,8 +109,11 @@ lag(X::FractionalGaussianNoise) = X.lag
 step(X::FractionalGaussianNoise) = 1
 
 """
-Autocovariance function of stardard (continuous time) fGn:
-    1/2 (|t+δ|^{2H} + |t-δ|^2H - 2|t|^{2H})
+    fGn_autocov(t::Real,H::Real,δ::Real)
+
+Autocovariance function of stardard (continuous time) fGn: 
+
+\$ 1/2 (|t+δ|^{2H} + |t-δ|^{2H} - 2|t|^{2H}) \$
 """
 fGn_autocov = (t::Real,H::Real,δ::Real) -> 1/2 * (abs(t+δ)^(2H) + abs(t-δ)^(2H) - 2*abs(t)^(2H))
 
@@ -120,8 +123,11 @@ end
 
 
 """
-Covariance matrix of standard (continuous time) fGn.
+    fGn_covmat(G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, H::Real, δ::Real)
 
+Compute the covariance matrix of standard (continuous time) fractional Gaussian noise of Hurst exponent `H` and time lag `δ` between the grid `G1` and `G2`.
+
+# Notes
 The special case of discrete regular grids with integer lag `d` is equivalent to `covmat(FractionalGaussianNoise(H, d), 1:N, 1:M)`.
 """
 function fGn_covmat(G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, H::Real, δ::Real)
