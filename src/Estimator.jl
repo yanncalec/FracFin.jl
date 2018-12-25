@@ -101,7 +101,6 @@ function powlaw_estim_predict(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:
 
     μc, Σc = cond_mean_cov(FractionalGaussianNoise(H, lags[s]), tidx[end]+1:tidx[end]+k, tidx, xm)
     return H, σ, μc, σ^2 * Σc  # <- adding mean(X[l,tidx]) to μc won't help
-
     
 end
 
