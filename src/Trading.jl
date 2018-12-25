@@ -28,9 +28,9 @@ function portfolio_value(A::AbstractVector{<:Real}, B::AbstractVector{<:Real}, P
     @assert length(A) == length(B) == length(P)
 #     @assert 1 >= C >= 0
     
-    # The portfolio value is the sum of the cash value and the spot value of asset:
-    # The cash value at time t is the cumulation of historical gain,
-    # The spot value of asset at time t is the quantity times the spot price.
+    # The cash value at time t is the cumulation of historical gain in cash,
+    # The spot value of asset at time t is the quantity of asset in possesion times the spot price.
+    # The portfolio value is the sum of 1) the cash value and the spot value of asset
     return cumsum((1-C) * (A.*P) - (1+C) * (B.*P)) + cumsum(B-A) .* P
 end
 
