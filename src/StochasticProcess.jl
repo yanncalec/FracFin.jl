@@ -177,7 +177,7 @@ end
 Compute the auto-covarince sequence of a stationary process on a regular grid.
 """
 function autocov!(C::AbstractVector{<:AbstractFloat}, X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle
-    # @assert isregulargrid(G)    
+    # @assert isregulargrid(G)
     @assert length(C) == length(G)  # check dimension
 
     # construct the auto-covariance kernel
@@ -204,7 +204,8 @@ function autocov!(C::Matrix{<:AbstractFloat}, X::StationaryProcess{T}, G::Abstra
     return if isregulargrid(G)
         # construct the covariance matrix (a Toeplitz matrix)
         covmat!(C, covseq(X,G))
-    else  # if G is not regular the `covseq` can not be applied, invoke the function of `StochasticProcess`.
+    else
+        # if G is not regular the `covseq` can not be applied, invoke the function of `StochasticProcess`.
         invoke(autocov!, Tuple{Matrix{<:AbstractFloat}, StochasticProcess{S}, AbstractVector{<:S}} where S<:TimeStyle, C, X, G)
     end
 end
@@ -304,27 +305,19 @@ end
 
 """
 Conditional mean and covariance of a zero-mean Gaussian process `P` on the position `Gx` given the value `Y` on the position `Gy`.
-
-# Args
-- Y: vector or matrix. For matrix case the columns are i.i.d. observations.
 """
-function cond_mean_cov(P::StochasticProcess{T}, Gx::AbstractVector{<:T}, Gy::AbstractVector{<:T}, Y::AbstractVecOrMat{<:Real}) where T<:TimeStyle
-    @assert length(Gy) == size(Y,1)
-    
+function cond_mean_cov(P::StochasticProcess{T}, Gx::AbstractVector{<:T}, Gy::AbstractVector{<:T}, Y::AbstractVector{<:Real}) where T<:TimeStyle
+    @assert length(Gy) == length(Y)
+
     Σxx = covmat(P, Gx)
     Σxy = covmat(P, Gx, Gy)
     Σyy = covmat(P, Gy)
-    
-    iΣyy = pinv(Matrix(Σyy)) 
+    iΣyy = pinv(Matrix(Σyy))
+
+    μc = Σxy * iΣyy * Y
+    # μc = Σxy * (Σyy\Y)
     Σc = Σxx - Σxy * iΣyy * Σxy'
-    
-    μc = if ndims(Y) == 1 
-        # Σxy * (Σyy\Y)
-        Σxy * iΣyy * Y
-    else  # take mean if multiple observations are given
-        mean([Σxy * iΣyy * Y[:,n] for n=1:size(Y,2)])
-    end
-    
+
     return μc, Σc
 end
 
@@ -350,12 +343,12 @@ function cond_mean_coeff(P::StochasticProcess{T}, k::Integer, l::Integer; mode::
         for i=2:k
             push!(Cv, Cv[end]*M)
         end
-    
+
         return vcat(Cv...)
     else
         Cv = covmat(P, l:l+k-1, 0:l-1) * pinv(Matrix(Σyy))
         return Cv
-    end    
+    end
 end
 
 

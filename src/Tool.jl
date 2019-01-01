@@ -231,11 +231,11 @@ function lagdiff(X::AbstractVecOrMat{<:Number}, d::Int, mode::Symbol=:causal)
 end
 
 function lagdiff(X::AbstractVector{<:Number}, dlags::AbstractVector{<:Integer}, mode::Symbol=:causal)
-    return hcat([lagdiff(X, d, :causal) for d in dlags]...)
+    return hcat([lagdiff(X, d, mode) for d in dlags]...)
 end
 
 function lagdiff(X::AbstractMatrix{<:Number}, dlags::AbstractVector{<:Integer}, mode::Symbol=:causal)
-    return reshape(hcat([lagdiff(X, d, :causal) for d in dlags]...), (size(X,1),:,length(dlags)))
+    return reshape(hcat([lagdiff(X, d, mode) for d in dlags]...), (size(X,1),:,length(dlags)))
 end
 
 ###### Time series manipulation ######
@@ -353,4 +353,3 @@ function equalize_daynight(sdata::AbstractVector)
     end
     return edata
 end
-

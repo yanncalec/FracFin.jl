@@ -1,6 +1,27 @@
 ########## Strategies for automatic trading ##########
 
-function signedgain(N::AbstractVector{<:Real}, P::AbstractVector{<:Real}, C::Real)
+"""
+Compute the return from raw price.
+"""
+function price2return(P::AbstractVector{<:Real}, lag::Integer; mode::Symbol=:causal, method::Symbol=:ori)
+    # @assert all(P.>0)
+    return if method==:ori
+        if mode==:causal
+            lagdiff(P, lag, mode) ./ circshift(P, lag)
+        else
+            lagdiff(P, lag, mode) ./ P
+        end
+    else
+        lagdiff(log.(P), lag, mode)
+    end
+end
+
+function price2return(P::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}; kwargs...)
+    hcat([price2return(P, d, kwargs...) for d in lags]...)
+end
+
+
+function signed_gain(N::AbstractVector{<:Real}, P::AbstractVector{<:Real}, C::Real)
 	#     @assert all.(P.>0)
 	#     @assert Cv >= 0
 	#     @assert length(N) == length(P)
@@ -9,10 +30,11 @@ function signedgain(N::AbstractVector{<:Real}, P::AbstractVector{<:Real}, C::Rea
 	return N[end] * P[end] - sum(Q.*P[1:end-1]) - sum(abs.(Q).*P[1:end-1]) * C
 end
 
+
 """
     portfolio_value(A::AbstractVector{<:Real}, B::AbstractVector{<:Real}, P::AbstractVector{<:Real}, C::Real)
 
-Compute the gain of a series of orders given the price and the commission rate.
+Compute the gain of a series of orders (value of a portfolio) given the price and the commission rate.
 
 # Args
 - A: orders of ask (short/sell)
@@ -25,13 +47,14 @@ Time series of cumulative signed gain
 """
 function portfolio_value(A::AbstractVector{<:Real}, B::AbstractVector{<:Real}, P::AbstractVector{<:Real}, C::Real)
     @assert all(A.>=0) && all(B.>=0) && all(P.>0)
-    @assert length(A) == length(B) == length(P)
-#     @assert 1 >= C >= 0
-    
-    # The cash value at time t is the cumulation of historical gain in cash,
-    # The spot value of asset at time t is the quantity of asset in possesion times the spot price.
-    # The portfolio value is the sum of 1) the cash value and the spot value of asset
-    return cumsum((1-C) * (A.*P) - (1+C) * (B.*P)) + cumsum(B-A) .* P
+    @assert length(A) == length(B) # <= length(P)
+    # @assert 1 >= C >= 0
+    L = min(length(A), length(P))
+
+    # The portfolio value is the sum of 1) the cash value and 2) the spot value of asset.
+    # 1) The cash value at time t is the cumulation of historical gain in cash.
+    # 2) The spot value of asset at time t is the quantity of asset in possesion times the spot price.
+    return cumsum((1-C) * (A[1:L].*P[1:L]) - (1+C) * (B[1:L].*P[1:L])) + cumsum(B-A)[1:L] .* P[1:L]
 end
 
 
@@ -39,35 +62,35 @@ end
 Make unitary rolling orders from a time series of return value.
 
 The unitary rolling order consists in holding a unitary asset for only one time unit:
-- if buy at time `t` then must sell out at time `t+1`
-- if short at time `t` then must buy back at time `t+1`
+- if buy now then must sell out at next
+- if short now then must buy back at next
 
 # Args
-- R: (future) return, a time series (of fixed step)
+- R: (future, or anti-causal) return, a time series (of fixed step)
+- d: time unit
 - C: commission rate
 - position: :long, :short or :both
 
 # Returns
 A, B: the series of ask and bid orders, which is one element longer than the input `R`.
 """
-function make_unitary_rolling_orders(R::AbstractVector{<:Real}, C::Real; position::Symbol=:both)
-#     @assert C>0
-    # orders for Ask (short/sell) and Bid (long/buy): 
-    A, B = zeros(length(R)+1), zeros(length(R)+1)  
-    A0, B0 = R.<-C, R.>C
-    
+function make_unitary_rolling_orders(R::AbstractVector{<:Real}, d::Integer, C::Real; position::Symbol=:both)
+    # @assert C>0
+    # orders for Ask (short/sell) and Bid (long/buy):
+    A, B = zeros(length(R)+d), zeros(length(R)+d)
+    A0, B0 = R.<-C, R.>C  # NaN-safe
+
     if position in (:long, :both)
         # make long position rolling order: buy then sell
-        B[1:end-1] += B0
-        A[2:end] += B0
+        B[1:end-d] += B0
+        A[d+1:end] += B0
     end
-    
+
     if position in (:short, :both)
         # make short position rolling order: short then buy
-        A[1:end-1] += A0
-        B[2:end] += A0
+        A[1:end-d] += A0
+        B[d+1:end] += A0
     end
-    
+
     return A,B
 end
-

@@ -28,7 +28,7 @@ import Dates
 import Dates:AbstractTime, AbstractDateTime, TimePeriod
 
 import TimeSeries
-import TimeSeries: TimeArray
+import TimeSeries: AbstractTimeSeries, TimeArray
 
 import RCall
 

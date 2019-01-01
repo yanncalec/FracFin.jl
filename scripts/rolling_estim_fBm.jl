@@ -1,5 +1,3 @@
-__precompile__()
-
 using ArgParse
 import ArgParse: parse_item
 
