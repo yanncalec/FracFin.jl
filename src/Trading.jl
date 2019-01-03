@@ -3,7 +3,7 @@
 """
 Compute the return from raw price.
 """
-function price2return(P::AbstractVector{<:Real}, lag::Integer; mode::Symbol=:causal, method::Symbol=:ori)
+function price2return(P::AbstractVector{<:Real}, lag::Integer, mode::Symbol=:causal; method::Symbol=:ori)
     # @assert all(P.>0)
     return if method==:ori
         if mode==:causal

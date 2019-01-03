@@ -87,13 +87,15 @@ end
 # end
 
 
-# """
-# Rolling mean in row direction.
-# """
-# function rolling_mean(X::AbstractVecOrMat{<:Number}, w::Integer, p::Integer=1; kwargs...)
-#     Xm = rolling_apply_hard(x->mean(x, dims=2), X, w, d; kwargs...)
-#     return ndims(X)>1 ? Xm : vec(Xm)
-# end
+"""
+Rolling mean in row direction.
+"""
+function rolling_mean(X::AbstractVecOrMat{<:Number}, w::Integer, p::Integer=1; kwargs...)
+    res = rolling_apply(x->mean(x, dims=1), X, w, 1, p; kwargs...)
+    Xm = hcat([x[2] for x in res]...)[:]
+    tidx = [x[1] for x in res]
+    return Xm, tidx
+end
 
 
 ######## Rolling estimators ########
@@ -273,8 +275,6 @@ function rolling_regress_predict(regressor::Function, predictor::Function, X0::A
 end
 
 
-
-
 function rolling_estim_predict(estim::Function, predict::Function, X0::AbstractVecOrMat{T}, (w,s,d)::Tuple{Integer,Integer,Integer}, p::Integer, trans::Function=(x->vec(x)); mode::Symbol=:causal, nan::Symbol=:ignore) where {T<:Number}
     X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
     L = size(X,2)
@@ -296,7 +296,7 @@ function rolling_estim_predict(estim::Function, predict::Function, X0::AbstractV
             else
                 rolling_apply_hard(trans, xv, s, d; mode=:causal)
             end
-
+            xs  = hcat([x[2] for x in xs]...)  # added 2019-01
             if length(xs) > 0
                 # println(size(xs))
                 Θ = estim(squeezedims(xs, dims=[1,2]))  # estimations
