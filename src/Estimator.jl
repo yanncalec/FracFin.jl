@@ -458,8 +458,10 @@ The MLE method can be expensive on data of large dimensions due to the inversion
 - X, d: same as in `fGn_MLE_estim()`
 - s,l: sub window size, length of decorrelation
 """
-fGn_MLE_estim(X::AbstractVector{<:Real}, d::Integer, s::Integer, l::Integer; kwargs...) = fGn_MLE_estim(rolling_vectorize(X, s, l, mode=:causal), d; kwargs...)
-
+function fGn_MLE_estim(X::AbstractVector{<:Real}, d::Integer, s::Integer, l::Integer; kwargs...)
+    t, V = rolling_vectorize(X, s, 1, l, mode=:causal)
+    return fGn_MLE_estim(V, d; kwargs...)
+end
 
 """
 Maximum likelihood estimation and prediction of fGn.
@@ -508,7 +510,7 @@ function ms_fGn_MLE_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, w::In
 
     for (n,lag) in enumerate(lags)  # time lag for finite difference
         # vectorization with window size w
-        dXo = rolling_vectorize(X[lag+1:end]-X[1:end-lag], w, 1)
+        dXo = rolling_vectorize(X[lag+1:end]-X[1:end-lag], w, 1, 1)
         # rolling mean with window size 2lag, then down-sample at step lag
         dX = rolling_mean(dXo, 2lag, lag; boundary=:hard)
 

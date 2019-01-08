@@ -304,6 +304,8 @@ end
 #### Statistical inference on stochastic process ####
 
 """
+    cond_mean_cov(P::StochasticProcess{T}, Gx::AbstractVector{<:T}, Gy::AbstractVector{<:T}, Y::AbstractVector{<:Real}) where T<:TimeStyle
+
 Conditional mean and covariance of a zero-mean Gaussian process `P` on the position `Gx` given the value `Y` on the position `Gy`.
 """
 function cond_mean_cov(P::StochasticProcess{T}, Gx::AbstractVector{<:T}, Gy::AbstractVector{<:T}, Y::AbstractVector{<:Real}) where T<:TimeStyle
@@ -312,13 +314,17 @@ function cond_mean_cov(P::StochasticProcess{T}, Gx::AbstractVector{<:T}, Gy::Abs
     Σxx = covmat(P, Gx)
     Σxy = covmat(P, Gx, Gy)
     Σyy = covmat(P, Gy)
+    # inverse of Σyy, method 1: pseudo inverse
     iΣyy = pinv(Matrix(Σyy))
+    # # method 2: LU
+    # iL = inv(cholesky(Σyy).L)
+    # iΣyy = iL' * iL
 
     μc = Σxy * iΣyy * Y
     # μc = Σxy * (Σyy\Y)
     Σc = Σxx - Σxy * iΣyy * Σxy'
 
-    return μc, Σc
+    return μc, Σc, Σxy * iΣyy
 end
 
 cond_mean_cov(P::StochasticProcess, gx::ContinuousTime, Gy::AbstractVector, Y::AbstractVector) = cond_mean_cov(P, [gx], Gy, Y)

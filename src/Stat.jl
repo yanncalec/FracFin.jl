@@ -127,13 +127,13 @@ pca(X::AbstractMatrix, nc::Int, center=false) = pca(X, nc, StatsBase.weights(one
 """
 Multi-linear regression in the column direction.
 """
-function multi_linear_regression_colwise(Y::AbstractVecOrMat{T}, X::AbstractVecOrMat{T}, w::AbstractWeights) where {T<:Real}
+function multi_linear_regression_colwise(Y::AbstractVecOrMat{<:Real}, X::AbstractVecOrMat{<:Real}, w::AbstractWeights)
     @assert size(Y,1)==size(X,1)==length(w)
     # println("size(Y)=",size(Y))
     # println("size(X)=",size(X))
-    μy = mean(Y, w, 1)[:]  # Julia function (version <= 0.7) `mean` does not take keyword argument `dims=1` if weight is passed.
-    μx = mean(X, w, 1)[:]
-    Σyx = cov(Y, X, w)   # this calls user defined cov function
+    μy = mean(Y, w, 1)  # Julia function (version <= 0.7) `mean` does not take keyword argument `dims=1` if weight is passed. This yields a scalar of Y is vector.
+    μx = mean(X, w, 1)
+    Σyx = cov(Y, X, w)   # This calls user defined cov function. This yields scalar if Y and X are vectors.
     Σxx = cov(X, X, w)
 
     # Σxx += 1e-5 * Matrix{Float64}(I,size(Σxx))  # perturbation
@@ -147,14 +147,14 @@ function multi_linear_regression_colwise(Y::AbstractVecOrMat{T}, X::AbstractVecO
     #     zero(Σyx)
     # end
 
-    β = μy - A * μx  # scalar or vector
+    β = μy - A * μx'  # scalar or vector, transpose has no effect on scalar
     E = Y - (A * X' .+ β)'
     Σ = cov(E, E, w)
-    return (A, β), E, Σ
+    return A, β, E, Σ
 end
 
 """
-    linear_regression(Y::AbstractMatrix, X::AbstractMatrix, w::AbstractWeights; dims::Int=1)
+    linear_regression(Y::AbstractMatrix, X::AbstractMatrix, w::AbstractWeights; dims::Integer=1)
 
 Reweighted (multi-)linear regression of data matrix `Y` versus `X` in the given dimension (dimension of observation).
 
@@ -163,7 +163,7 @@ Reweighted (multi-)linear regression of data matrix `Y` versus `X` in the given 
 - E: residual
 - Σ: covariance of the residual
 """
-function linear_regression(Y::AbstractMatrix, X::AbstractMatrix, w::AbstractWeights; dims::Int=1)
+function linear_regression(Y::AbstractMatrix, X::AbstractMatrix, w::AbstractWeights; dims::Integer=1)
     if dims==1
         return multi_linear_regression_colwise(Y, X, w)
     else
@@ -171,21 +171,66 @@ function linear_regression(Y::AbstractMatrix, X::AbstractMatrix, w::AbstractWeig
     end
 end
 
-linear_regression(Y::AbstractMatrix, X::AbstractMatrix; dims::Int=1) =
-    linear_regression(Y, X, StatsBase.weights(ones(size(Y,1))); dims=dims)
+linear_regression(Y::AbstractMatrix, X::AbstractMatrix; dims::Integer=1) =
+    linear_regression(Y, X, StatsBase.weights(ones(size(Y,dims))); dims=dims)
 
-function linear_regression(Y::AbstractVector, X::AbstractVector, w::AbstractWeights)
+function linear_regression(Y::AbstractVector, X::AbstractVecOrMat, w::AbstractWeights)
     return multi_linear_regression_colwise(Y, X, w)
 end
 
-linear_regression(Y::AbstractVector, X::AbstractVector) = linear_regression(Y, X, StatsBase.weights(ones(size(Y,1))))
+linear_regression(Y::AbstractVector, X::AbstractVecOrMat) = linear_regression(Y, X, StatsBase.weights(ones(size(Y,1))))
 
 
-function linear_prediction(R::Tuple, X0::AbstractVecOrMat, Y0::AbstractVecOrMat=[])
-    A,β = R[1]
-    Yp = A * X0 .+ β
-    Ep = isempty(Y0) ? [] : Y0-Yp  # error of prediction
-    return Yp, Y0, Ep
+# function linear_prediction(R::Tuple, X0::AbstractVecOrMat, Y0::AbstractVecOrMat=[])
+#     A,β = R[1]
+#     Yp = A * X0 .+ β
+#     Ep = isempty(Y0) ? [] : Y0-Yp  # error of prediction
+#     return Yp, Y0, Ep
+# end
+
+
+"""
+    conv_regression(X::AbstractVector{<:Real}, Y::AbstractVector{<:Real}, w::Integer; mode::Symbol=:causal, nan::Symbol=:ignore)
+
+Estimate by linear regression the convolution kernel and bias such that `kernel * X + bias = Y`.
+
+# Args
+- X: input vector
+- Y: output vector
+- w: length of the convolution kernel
+- mode: mode of convolution, :causal or :anticausal
+- nan: how NaN values are handled: :ignore for ignoring or :zero for replacing by zero
+
+# Returns
+A, b, E, σ^2: kernel, bias, error and variance of error
+"""
+function conv_regression(X::AbstractVector{<:Real}, Y::AbstractVector{<:Real}, w::Integer, p::Integer=1; mode::Symbol=:causal, nan::Symbol=:ignore)
+    @assert length(X) == length(Y)
+
+    tidx, Xm0 = rolling_vectorize(X, w, 1, p; mode=mode)
+    Xm = transpose(Xm0)
+    Yr = Y[tidx]
+
+    if nan==:ignore
+        idx = findall((any(isnan.(Xm), dims=2)[:] .+ isnan.(Yr)).==0)
+        # println((any(isnan.(Xm), dims=2)[:] .+ isnan.(Yr)).==0)
+        # println(any(isnan.(Xm), dims=2)[:])
+        # println(isnan.(Yr))
+        # print(idx)
+        Yr = Yr[idx]
+        Xm = Xm[idx,:]
+    elseif nan==:zero
+        Yr[isnan.(Yr)] .= 0
+        Xm[isnan.(Xm)] .= 0
+    else
+        error("Unknown method for NaN values")
+    end
+
+    res = linear_regression(Yr, Xm)
+    # res = IRLS(Yr, Xm, .5)
+
+    A, b, E, σ2 = reverse(res[1][:]), res[2][end], res[3], sqrt(res[4][end])
+    return A, b, E, σ2
 end
 
 
@@ -193,29 +238,80 @@ end
 """
 IRLS
 """
-function IRLS(Y::AbstractVecOrMat{T}, X::AbstractVecOrMat{T}, pnorm::Real=2.; maxiter::Int=10^3, tol::Float64=10^-3, vreg::Float64=1e-8) where {T<:Real}
+function IRLS(Y::AbstractVecOrMat{<:Real}, X::AbstractVecOrMat{<:Real}, pnorm::Real=2.; maxiter::Integer=10^3, tol::Real=10^-3, vreg::Real=1e-8)
     @assert pnorm > 0
 
     wfunc = E -> (sqrt.(sum(E.*E, dims=2) .+ vreg).^(pnorm-2))[:]  # function for computing weight vector
 
-    (A, β), E, Σ = linear_regression(Y, X)  # initialization
-    w0::Vector{Float64} =  wfunc(E) # weight vector
-    w0 /= sum(w0)
-    n::Int = 1
-    err::Float64 = 0.
+    A, β, E, Σ = linear_regression(Y, X)  # initialization
+    w0 =  wfunc(E) # weight vector
+    # w0 /= sum(w0)
+    err = 0.
 
     for n=1:maxiter
-        (A, β), E, Σ = linear_regression(Y, X, StatsBase.weights(w0))
+        A, β, E, Σ = linear_regression(Y, X, StatsBase.weights(w0))
         w = wfunc(E)
-        err = norm(w - w0) / norm(w0)
-        w0 = w / sum(w)
+        err = LinearAlgebra.norm(w - w0)/LinearAlgebra.norm(w0)
+        w0 = w # / sum(w)
         if  err < tol
             break
         end
     end
     # println(n)
     # println(err)
-
-    return (A, β), w0, E, sum(sqrt.(sum(E.*E, dims=2)).^pnorm)
+    Σ = sum(sqrt.(sum(E.*E, dims=2)).^pnorm)
+    return A, β, E, Σ, w0
 end
 
+
+###### Online Statistics ######
+
+function exponential_moving_average!(X::AbstractVector{<:Number}, α::Real)
+    # @assert 0<α<=1
+    for t=2:size(X,1)
+        X[t] = α * X[t] + (1-α) * X[t-1]
+    end
+    return X
+end
+
+function exponential_moving_average!(X::AbstractMatrix{<:Number}, α::Real)
+    # @assert 0<α<=1
+    for t=2:size(X,1)
+        X[t,:] = α * X[t,:] + (1-α) * X[t-1,:]
+    end
+    return X
+end
+
+function exponential_moving_average(X::AbstractVecOrMat{<:Number}, α::Real, n::Integer=1)
+    @assert 0<α<=1
+    X1 = copy(X)
+    Xm = copy(X1)
+    exponential_moving_average!(Xm, α)
+
+    for t=2:n
+        X1 += X-Xm  # N-fold EMA
+        # or the zero-lag EMA filter: X1 += X-circshift(X, 1)
+        Xm = copy(X1)
+        exponential_moving_average!(Xm, α)
+    end
+    return Xm
+end
+
+function simple_moving_average!(X::AbstractVector{<:Number}, n::Integer)
+    @assert n>0
+    for t=2:size(X,1)
+        X[t] = (X[t] + X[t-1] * min(n, t-1) - (t>n ? X[t-n] : 0)) / min(n, t)
+    end
+    return X
+end
+
+function simple_moving_average!(X::AbstractMatrix{<:Number}, n::Integer)
+    @assert n>0
+    for t=2:size(X,1)
+        # X[t,:] = mean(X[max(1,t-n+1):t,:], dims=1)
+        X[t,:] = (X[t,:] + X[t-1,:] * min(n, t-1) - (t>n ? X[t-n,:] : zero(X[1,:]))) / min(n, t)
+    end
+    return X
+end
+
+simple_moving_average(X::AbstractVecOrMat{<:Number}, n::Integer) = simple_moving_average!(copy(X), n)

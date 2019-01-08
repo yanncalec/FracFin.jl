@@ -1,9 +1,14 @@
 ########## Computational Harmonic Analysis and Wavelet transform ##########
 
-function native_conv(u::AbstractArray{U,1}, v::AbstractArray{V,1}) where {U<:Number, V<:Number}
+"""
+    native_conv(u::AbstractVector{<:Number}, v::AbstractVector{<:Number})
+
+Convolution between two vectors computed in the native way.
+"""
+function native_conv(u::AbstractVector{<:Number}, v::AbstractVector{<:Number})
     m = length(u)
     n = length(v)
-    w = zeros(promote_type(U,V), m+n-1)
+    w = zeros(promote_type(eltype(u),eltype(v)), m+n-1)
 
     @inbounds begin
         for j=1:m, k=1:n
@@ -25,14 +30,16 @@ end
 # - Vaidyanathan: 1
 
 """
+    convolution_matrix(h::AbstractVector{<:Number}, N::Integer)
+
 Construct the matrix representation of the full convolution between a kernel `h` and a vector of length `N`.
 """
-function convolution_matrix(h::AbstractVector{T}, N::Int) where {T<:Number}
+function convolution_matrix(h::AbstractVector{<:Number}, N::Integer)
     @assert N>0
     M = length(h)
 
-    K = zeros(T, (M+N-1, M+N-1))
-    hz = vcat(h[end:-1:1], zeros(T, N-1)) # zero padding of the kernel
+    K = zeros(eltype(h), (M+N-1, M+N-1))
+    hz = vcat(h[end:-1:1], zeros(eltype(h), N-1)) # zero padding of the kernel
     # K = hcat([circshift(hz,n) for n=0:M+N-2]...)
     for n=0:M+N-2
         K[:,n+1] = circshift(hz,n)
@@ -50,6 +57,43 @@ end
 
 
 """
+    fullpast_filtration(X::AbstractVector{<:Number}, filters::AbstractVector, n::Integer=1; method::Symbol=:recursive)
+"""
+function fullpast_filtration(X::AbstractVector{<:Number}, filters::AbstractVector, n::Integer=1; method::Symbol=:recursive)
+    @assert length(X) >= length(filters)
+#     Φ = V -> vcat(V[1], [sum(V[1:t].*filters[t]) for t=1:length(filters)])
+    Φ = V -> [sum(V[1:t].*filters[t]) for t=1:length(filters)]
+    Xϕ = Φ(X)
+    X1 = copy(X)
+
+    # phase-lag correction
+    for t=2:n
+        if method==:recursive
+            X1 += X - Xϕ
+        else
+            X1 += X - circshift(X, 1)
+        end
+        Xϕ = Φ(X1)
+    end
+    return Xϕ
+end
+
+
+"""
+Apply the convolution kernel `A` and bias `b` to the input vector `X` and yield `A * X + b`.
+"""
+function conv_operator(X::AbstractVector{<:Real}, A::AbstractVector{<:Real}, b::Real=0.; nan::Symbol=:zero, mode::Symbol=:causal)
+    X = copy(X)
+    if nan==:zero
+        X[isnan.(X)] .= 0
+    end
+    Y = native_conv(A, X) .+ b
+    return (mode==:causal) ? Y[1:length(X)] : Y[end-length(X)+1:end]
+end
+
+
+
+"""
 Compute the scaling and the wavelet function using the cascade algorithm.
 
 The implementation follows the reference 2, but with a modified initialization.
@@ -62,7 +106,7 @@ The implementation follows the reference 2, but with a modified initialization.
 - https://en.wikipedia.org/wiki/Cascade_algorithm
 - http://cnx.org/content/m10486/latest/
 """
-function wavefunc(lo::AbstractVector{T}, hi::AbstractVector{T}; level::Int=10, nflag::Bool=true) where {T<:Real}
+function wavefunc(lo::AbstractVector{<:Real}, hi::AbstractVector{<:Real}; level::Integer=10, nflag::Bool=true)
     @assert length(lo)==length(hi)
 
     # Initialization of the cascade algorithm
@@ -142,7 +186,7 @@ julia> y[kmask] # center part, same size as x
 julia> y[vmask] # valide part, same as y[kmask][dmask]
 ```
 """
-function convmask(nx::Int, nh::Int, mode::Symbol)
+function convmask(nx::Integer, nh::Integer, mode::Symbol)
     kmask = zeros(Bool, nx+nh-1)
 
     if mode == :left || mode == :causal
@@ -164,14 +208,14 @@ end
 """
 Down-sampling operator.
 """
-function downsampling(x::AbstractArray{<:Any, 1}, s::Int=2)
+function downsampling(x::AbstractVector, s::Integer=2)
     return x[1:s:end]
 end
 
 """
 Up-sampling operator.
 """
-function upsampling(x::AbstractArray{<:Any, 1}, s::Int=2; tight::Bool=true)
+function upsampling(x::AbstractVector, s::Integer=2; tight::Bool=true)
     y = zeros(length(x)*s)
     y[1:s:end] = x
     return tight ? y[1:(end-(s-1))] : y
@@ -196,7 +240,7 @@ Compute filters of Wavelet Packet transform.
 # Returns
 - a matrix of size ?-by-2^n that each column is a filter.
 """
-function wpt_filter(lo::Vector{T}, hi::Vector{T}, n::Int) where {T<:Number}
+function wpt_filter(lo::AbstractVector{<:Number}, hi::AbstractVector{<:Number}, n::Integer)
     F0::Vector{Vector{T}}=[[1]]
     for l=1:n+1
         F1::Vector{Vector{T}}=[]
@@ -237,7 +281,7 @@ Quadratic mirrored filter.
 # Notes
 - IMPORTANT: convention of qmf is (-1).^(0:length(h)-1) NOT (-1).^(1:length(h))
 """
-function qmf(h::AbstractVector{T}) where {T<:Number}
+function qmf(h::AbstractVector{<:Number})
     reverse(h .* (-1).^(0:length(h)-1))  # reverse(x) = x[end:-1:1]
 end
 
@@ -253,7 +297,7 @@ Dyadic scale stationary wavelet transform using à trous algorithm.
 # Notes
 Current implementation is buggy: reconstruction by `iswt` can be very wrong.
 """
-function swt(x::AbstractVector{T}, lo::AbstractVector{T}, hi::AbstractVector{T}, level::Int, mode::Symbol) where {T<:Real}
+function swt(x::AbstractVector{<:Number}, lo::AbstractVector{<:Number}, hi::AbstractVector{<:Number}, level::Integer, mode::Symbol)
     @assert level > 0
     @assert length(lo) == length(hi)
 
@@ -291,7 +335,7 @@ end
 """
 Inverse stationary transform.
 """
-function iswt(ac::AbstractVector{T}, dc::AbstractMatrix{T}, lo::AbstractVector{T}, hi::AbstractVector{T}, mode::Symbol) where {T<:Real}
+function iswt(ac::AbstractVector{<:Number}, dc::AbstractMatrix{<:Number}, lo::AbstractVector{<:Number}, hi::AbstractVector{<:Number}, mode::Symbol)
     @assert length(ac) == size(dc,1)
 
     level = size(dc, 2)  # number of levels of transform
@@ -318,7 +362,7 @@ end
 """
 Embedding.
 """
-function emb(x::AbstractVector{T}, mask::Vector{Bool}) where {T<:Number}
+function emb(x::AbstractVector{<:Number}, mask::AbstractVector{Bool})
     idx = findall(mask)
     @assert length(x) <= length(idx)
     y = zeros(T, length(mask))
@@ -344,7 +388,7 @@ Dyadic scale stationary wavelet transform using python library `pywt`.
 - Original signal is zero-padded since `pywt.swt` requires signals of length 2^N
 - The mode of convolution used by `pywt.swt` is not clear.
 """
-function swt(x0::AbstractVector{T}, wvl::String, maxlevel::Int; mode::Symbol=:left) where {T<:Real}
+function swt(x0::AbstractVector{<:Number}, wvl::String, maxlevel::Integer; mode::Symbol=:left)
     # @PyCall.pyimport pywt
     wavelet = pywt[:Wavelet](wvl)
     dec_lo, dec_hi, rec_lo, rec_hi = wavelet[:inverse_filter_bank]
@@ -405,7 +449,7 @@ Inverse stationary wavelet transform using python library `pywt`.
 - wvl: name of wavelet, see `pywt.swt` documentation
 - zmask: mask of zero-padding
 """
-function iswt(ac::AbstractVector{T}, dc::AbstractMatrix{T}, wvl::String, zmask::AbstractVector{Bool}) where {T<:Real}
+function iswt(ac::AbstractVector{<:Number}, dc::AbstractMatrix{<:Number}, wvl::String, zmask::AbstractVector{Bool})
     # @PyCall.pyimport pywt
     level = size(dc,2)
     w = [(ac, dc[:,1])]
@@ -433,7 +477,7 @@ Continuous wavelet transform based on quadrature.
 - sclrng: range of integer scales
 - mode: mode of convolution {:left, :center, :right} or {:causal, :valid, :anticausal}
 """
-function cwt_quad(x::AbstractVector{T}, wfunc::Function, sclrng::AbstractVector{Int}, mode::Symbol) where {T<:Real}
+function cwt_quad(x::AbstractVector{<:Number}, wfunc::Function, sclrng::AbstractVector{<:Integer}, mode::Symbol)
     Ns = length(sclrng)
     Nx = length(x)
 
@@ -467,7 +511,7 @@ Evaluate the wavelet function at integer scales by looking-up table.
 # Note
 For accuracy, increase the density of grid for pre-evaluation of ψ.
 """
-function _intscale_wavelet_filter(k::Int, ψ::Vector{Float64}, Sψ::Tuple{Real,Real}, v::Int=0)
+function _intscale_wavelet_filter(k::Integer, ψ::AbstractVector{<:Real}, Sψ::Tuple{Real,Real}, v::Integer=0)
     # @assert k > 0
     # @assert Sψ[2] > Sψ[1]
 
@@ -493,7 +537,7 @@ end
 """
 Evaluate the wavelet function at integer scales.
 """
-function _intscale_wavelet_filter(k::Int, ψ::Function, Sψ::Tuple{Real,Real}, v::Int=0)
+function _intscale_wavelet_filter(k::Integer, ψ::Function, Sψ::Tuple{Real,Real}, v::Integer=0)
     # @assert k > 0
     # @assert Sψ[2] > Sψ[1]
 
@@ -515,7 +559,7 @@ Integer (even) scale Haar filter.
 
 The original Haar wavelet takes value 1 on [0,1/2) and -1 on [1/2, 1) and 0 elsewhere.
 """
-function _intscale_haar_filter(scl::Int)
+function _intscale_haar_filter(scl::Integer)
     @assert scl > 0 && iseven(scl)
 
     k::Int = div(scl,2)
@@ -525,14 +569,14 @@ end
 
 mexhat(t::Real) = -exp(-t^2) * (4t^2-2t) / (2*sqrt(2π))
 
-function _intscale_mexhat_filter(k::Int)
+function _intscale_mexhat_filter(k::Integer)
     return _intscale_wavelet_filter(k, mexhat, (-5.,5.), 2)  # Mexhat has two vanishing moments
 end
 
 """
 Continous Mexican hat transform
 """
-function cwt_mexhat(x::Vector{Float64}, sclrng::AbstractVector{Int}, mode::Symbol=:center)
+function cwt_mexhat(x::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, mode::Symbol=:center)
     return cwt_quad(x, _intscale_mexhat_filter, sclrng, mode)
 end
 
@@ -558,7 +602,7 @@ Integer (even) scale B-Spline filter, which is defined as the auto-convolution o
 - The true scale is `2k`, like in `_intscale_haar_filter`.
 - A trick can be used to improve the scaling law at fine scales, but this corrupts the intercept with a unknown factor in the linear regression.
 """
-function _intscale_bspline_filter(scl::Int, v::Int)
+function _intscale_bspline_filter(scl::Integer, v::Integer)
     @assert scl > 0 && iseven(scl)
     @assert v>0
 
@@ -574,7 +618,7 @@ end
 """
 Continous Haar transform.
 """
-function cwt_haar(x::Vector{Float64}, sclrng::AbstractVector{Int}, mode::Symbol)
+function cwt_haar(x::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, mode::Symbol)
     all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
 
     return cwt_quad(x, _intscale_haar_filter, sclrng, mode)
@@ -594,7 +638,7 @@ Continous B-Spline transform at integer (even) scales.
 
 # TODO: parallelization
 """
-function cwt_bspline(x::Vector{Float64}, sclrng::AbstractVector{Int}, v::Int, mode::Symbol)
+function cwt_bspline(x::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, v::Integer, mode::Symbol)
     all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
 
     # bsfilter = k->normalize(_intscale_bspline_filter(k, v))
@@ -612,7 +656,7 @@ Evaluate the Fourier transform of a centered B-Spline wavelet.
 - Convention of Fourier transform:
     f(t) = 1/√2π \\int F(ω)e^{-iωt} dω
 """
-function _bspline_ft(ω::Real, v::Int)
+function _bspline_ft(ω::Real, v::Integer)
     #     @assert v>0  # check vanishing moment
     # # Version 1: non centered ψ. This works with convolution mode `:left`` and produces artefacts of radiancy straight lines.
     # return (ω==0) ? 0 : (2π)^((v-1)/2) * (-(1-exp(1im*ω/2))^2/(sqrt(2π)*1im*ω))^(v)  # non-centered bspline: supported on [0, v]
@@ -628,13 +672,13 @@ end
 
 Maximum scale of B-Spline wavelet transform of `v` vanishing moments for a signal of length `N`.
 """
-maxscale_bspline(N::Int, v::Int) = floor(Int, (N+1)/v/2)
+maxscale_bspline(N::Integer, v::Integer) = floor(Int, (N+1)/v/2)
 
 
 """
 The integrand function of C^ψ_ρ(τ, H) with a centered B-spline wavelet.
 """
-function Cψρ_bspline_integrand_center(τ::Real, ω::Real, ρ::Real, H::Real, v::Int)
+function Cψρ_bspline_integrand_center(τ::Real, ω::Real, ρ::Real, H::Real, v::Integer)
     return 1/(16^v * 2π) * (ω^2)^(v-(H+1/2)) * (sinc(ω*√ρ/4π)*sinc(ω/√ρ/4π))^(2v) * cos(ω*τ)
 end
 
@@ -650,7 +694,7 @@ Evaluate the integrand function of C^ψ_ρ(τ, H)
 - We use the fact that C^ψ_ρ(τ, H) is a real function to simplify the implementation.
 - In Julia the sinc function is defined as `sinc(x)=sin(πx)/(πx)`.
 """
-function Cψρ_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Int, mode::Symbol)
+function Cψρ_bspline_integrand(τ::Real, ω::Real, ρ::Real, H::Real, v::Integer, mode::Symbol)
     # The integrand is, by definition
     # _bspline_ft(ω*√ρ, v) * conj(_bspline_ft(ω/√ρ, v)) / abs(ω)^(2H+1) * exp(-1im*ω*τ)
     # this should be modulated by
@@ -672,7 +716,7 @@ end
 """
 Evaluate the function C^ψ_ρ(τ,H) by numerical integration.
 """
-function Cψρ_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
+function Cψρ_bspline(τ::Real, ρ::Real, H::Real, v::Integer, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
     @assert ρ>0
     @assert 1>H>0
     @assert v>H+1/2  # otherwise may raise `DomainError with 0.0`
@@ -687,7 +731,7 @@ end
 """
 Derivative w.r.t. H
 """
-function diff_Cψρ_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
+function diff_Cψρ_bspline(τ::Real, ρ::Real, H::Real, v::Integer, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
     f = ω -> ((ω==0) ? 0 : (-log(ω^2) * Cψρ_bspline_integrand(τ, ω, ρ, H, v, mode)))
     return QuadGK.quadgk(f, rng...)[1]
 end
@@ -699,7 +743,7 @@ Evaluate the matrix of `A_ρ(H, τ)` for varing ρ with the B-Spline wavelet.
 - The true scale is two times the scale index due to the special implementation of B-Spline wavelet, see also `_intscale_bspline_filter()`.
 - Consider parallelization.
 """
-function Amat_bspline(H::Real, v::Int, lag::Real, sclrng::AbstractVector{Int}, mode::Symbol)
+function Amat_bspline(H::Real, v::Integer, lag::Real, sclrng::AbstractVector{<:Integer}, mode::Symbol)
     # all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
     return gamma(2H+1) * sin(π*H) * [Cψρ_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
 end

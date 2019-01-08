@@ -67,11 +67,15 @@ Rolling vectorization.
 # Args
 - X: input vector or matrix
 - w: number of consecutive samples to be concatenated together
+- p: period
 """
-function rolling_vectorize(X::AbstractVecOrMat{<:Number}, w::Integer, p::Integer; kwargs...)
+function rolling_vectorize(X::AbstractVecOrMat{<:Number}, w::Integer, d::Integer=1, p::Integer=1; kwargs...)
     # res = rolling_apply_hard(x->vec(hcat(x...)), X, w, 1, p; kwargs...)
-    res = rolling_apply_hard(x->vec(x), X, w, 1, p; kwargs...)
-    return hcat([x[2] for x in res]...)
+    # res = rolling_apply_hard(x->vec(x), X, w, 1, p; kwargs...)
+    res = rolling_apply_hard(x->vec(x), X, w, d, p; kwargs...)
+    tidx = [x[1] for x in res]
+
+    return tidx, hcat([x[2] for x in res]...)
 end
 
 
@@ -90,11 +94,21 @@ end
 """
 Rolling mean in row direction.
 """
-function rolling_mean(X::AbstractVecOrMat{<:Number}, w::Integer, p::Integer=1; kwargs...)
-    res = rolling_apply(x->mean(x, dims=1), X, w, 1, p; kwargs...)
+function rolling_mean(X::AbstractVecOrMat{<:Number}, w::Integer; kwargs...)
+    res = rolling_apply(x->mean(x, dims=1), X, w, 1, 1; kwargs...)
     Xm = hcat([x[2] for x in res]...)[:]
-    tidx = [x[1] for x in res]
-    return Xm, tidx
+    # tidx = [x[1] for x in res]
+    return Xm
+end
+
+"""
+Rolling median in row direction.
+"""
+function rolling_median(X::AbstractVecOrMat{<:Number}, w::Integer; kwargs...)
+    res = rolling_apply(x->median(x, dims=1), X, w, 1, 1; kwargs...)
+    Xm = hcat([x[2] for x in res]...)[:]
+    # tidx = [x[1] for x in res]
+    return Xm
 end
 
 

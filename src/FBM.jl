@@ -16,18 +16,20 @@ end
 
 ss_exponent(X::FractionalBrownianMotion) = X.hurst
 
-"""
+@doc raw""" fBm_autocov(t,s,H)
+
 Autocovariance function of standard fBm:
-    1/2 * (|t|^{2H} + |s|^{2H} - |t-s|^{2H})
+    $\frac 1 2 (|t|^{2H} + |s|^{2H} - |t-s|^{2H})$
 """
 fBm_autocov = (t::Real,s::Real,H::Real) -> 1/2 * (abs(t)^(2H) + abs(s)^(2H) - abs(t-s)^(2H))
 
 autocov(X::FractionalBrownianMotion, t::Real, s::Real) = fBm_autocov(t,s,X.hurst)
 
 """
-Covariance matrix of fBm.
+    fBm_covmat(G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, H::Real)
 
-This is equivalent to `covmat(FractionalBrownianMotion(H), G1, G2)`.
+Compute the covariance matrix of fBm with hurst `H` between two grids `G1` and `G2`.
+This gives the same result as `covmat(FractionalBrownianMotion(H), G1, G2)`.
 """
 function fBm_covmat(G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, H::Real)
     Σ = zeros(length(G1),length(G2))
@@ -88,8 +90,8 @@ Kpmm(x, t, H) = Kplus(x, t, H) - Kminus(x, t, H)
 
 
 ######## Fractional Gaussian Noise ########
-"""
-Fractional Gaussian noise (fGn) is the discrete time version of the continuous time differential process of a fBm: `B(t+δ) - B(t)`.  It is defined as `B(n+l) - B(n)`, where `l` is the lag.
+@doc raw"""
+Fractional Gaussian noise (fGn) is the discrete time version of the continuous time differential process of a fBm: $ B(t+\delta) - B(t) $.  It is defined as $ B(n+l) - B(n) $, where `l` is the lag.
 
 # Note
 - We adopt the anti-causal convention in the definition here.
@@ -108,12 +110,10 @@ ss_exponent(X::FractionalGaussianNoise) = X.parent_process.hurst
 lag(X::FractionalGaussianNoise) = X.lag
 step(X::FractionalGaussianNoise) = 1
 
-"""
+@doc raw"""
     fGn_autocov(t::Real,H::Real,δ::Real)
 
-Autocovariance function of stardard (continuous time) fGn: 
-
-\$ 1/2 (|t+δ|^{2H} + |t-δ|^{2H} - 2|t|^{2H}) \$
+Autocovariance function of stardard (continuous time) fGn: $ 1/2 (|t+δ|^{2H} + |t-δ|^{2H} - 2|t|^{2H}) $
 """
 fGn_autocov = (t::Real,H::Real,δ::Real) -> 1/2 * (abs(t+δ)^(2H) + abs(t-δ)^(2H) - 2*abs(t)^(2H))
 
@@ -162,6 +162,8 @@ end
 ss_exponent(X::FractionalWaveletNoise) = X.parent_process.hurst
 
 filter(X::FractionalWaveletNoise) = X.filter
+
+
 
 #### TODO : fWn ####
 

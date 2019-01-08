@@ -24,7 +24,7 @@ end
 
 ##### Algebra #####
 
-function shrinkage_by_value(X0::AbstractArray{T}, v::T, mode::Symbol=:soft) where {T<:Number}
+function shrinkage_by_value(X0::AbstractArray{<:Number}, v::Real, mode::Symbol=:soft)
     X1 = fill(zero(T), size(X0))  # or zero(X0)
     idx = findall(abs.(X0) .> v)
     if mode == :soft
@@ -35,7 +35,7 @@ function shrinkage_by_value(X0::AbstractArray{T}, v::T, mode::Symbol=:soft) wher
     return X1
 end
 
-function shrinkage_by_number(X0::AbstractArray{T}, n::Int, mode::Symbol=:soft) where {T<:Number}
+function shrinkage_by_number(X0::AbstractArray{<:Number}, n::Integer, mode::Symbol=:soft)
     Xv = ndims(X0)>1 ? vec(X0) : X0
     X1 = fill(zero(T), length(Xv))  # or zero(X0)
     idx = sortperm(abs.(Xv))[end-n+1:end]  # increasing order
@@ -47,7 +47,7 @@ function shrinkage_by_number(X0::AbstractArray{T}, n::Int, mode::Symbol=:soft) w
     return reshape(X1, size(X0))
 end
 
-function shrinkage_by_percentage(X0::AbstractArray{T}, p::Real, mode::Symbol=:soft) where {T<:Number}
+function shrinkage_by_percentage(X0::AbstractArray{<:Number}, p::Real, mode::Symbol=:soft)
     @assert 0 <= p <= 1
     return shrinkage_by_number(X0, floor(Int,p*length(X0)), mode)
 end
@@ -70,7 +70,7 @@ Remove singular dimensions of an array.
 # Note
 This function is safe for array of size (1,1,..1).
 """
-function squeezedims(X::AbstractArray{T}; dims::Union{Int,AbstractVector{Int}}) where {T<:Real}
+function squeezedims(X::AbstractArray{<:Real}; dims::Union{Int,AbstractVector{<:Integer}})
     dimx = tuple(intersect(tuple(findall(size(X).==1)...), dims)...)
     return if length(dimx) == 0
         X
@@ -95,7 +95,7 @@ iceil(x::Int, y::Int) = ceil(Int, x/y) * y
 """
 Reshape a vector `x` to a matrix of `r` rows with truncation if `length(x)` does not divide `r`.
 """
-function vec2mat(x::AbstractVector{T}, r::Int; keep::Symbol=:tail) where {T<:Real}
+function vec2mat(x::AbstractVector{<:Real}, r::Integer; keep::Symbol=:tail)
     @assert r<=length(x)  # number of row must be smaller than the size of x
     n = length(x) - (length(x)%r)
     return if keep == :head
@@ -108,7 +108,7 @@ function vec2mat(x::AbstractVector{T}, r::Int; keep::Symbol=:tail) where {T<:Rea
 end
 
 
-function norm(X::AbstractMatrix{T}, p::Real=2; dims::Int=1) where {T<:Number}
+function norm(X::AbstractMatrix{<:Number}, p::Real=2; dims::Integer=1)
     if dims==1
         return [LinearAlgebra.norm(X[:,n],p) for n=1:size(X,2)]
     else
@@ -120,7 +120,7 @@ end
 """
 Compute A^-1 * B using the lsqr iterative method.
 """
-function lsqr(A::AbstractMatrix{T}, B::AbstractMatrix{T}; kwargs...) where {T<:Real}
+function lsqr(A::AbstractMatrix{<:Real}, B::AbstractMatrix{<:Real}; kwargs...)
     # println("My lsqr")
     X = zeros(Float64, (size(A,2), size(B,2)))
     for n=1:size(B,2)
@@ -181,7 +181,7 @@ LevinsonDurbin(p::StationaryProcess{T}, g::AbstractVector{<:T}) where T<:TimeSty
 """
 Cholesky decomposition based on SVD.
 """
-function chol_svd(W::AbstractMatrix{T}) where {T<:Real}
+function chol_svd(W::AbstractMatrix{<:Real})
     Um, Sm, Vm = svd((W+W')/2)  # svd of forced symmetric matrix
     Ss = sqrt.(Sm[Sm.>0])  # truncation of negative singular values
     return Um*diagm(Ss)
@@ -191,7 +191,7 @@ end
 """
 Vandermonde matrix.
 """
-function vandermonde(dim::Tuple{Int,Int})
+function vandermonde(dim::Tuple{Integer,Integer})
     nrow, ncol = dim
     V = zeros(Float64, dim)
     for c = 1:dim[2]
@@ -200,13 +200,13 @@ function vandermonde(dim::Tuple{Int,Int})
     return V
 end
 
-vandermonde(nrow::Int, ncol::Int) = vandermonde((nrow, ncol))
+vandermonde(nrow::Integer, ncol::Integer) = vandermonde((nrow, ncol))
 
-function col_normalize(A::AbstractMatrix{T}, p::Real=2) where {T<:Real}
+function col_normalize(A::AbstractMatrix{<:Real}, p::Real=2)
     return A / diagm([norm(A[:,n], p) for n=1:size(A,2)])
 end
 
-function col_normalize!(A::AbstractMatrix{T}, p::Real=2) where {T<:Real}
+function col_normalize!(A::AbstractMatrix{<:Real}, p::Real=2)
     for n=1:size(A,2)
         A[:,n] ./= norm(A[:,n], p)
     end
@@ -220,7 +220,7 @@ row_normalize!(A) = col_normalize!(transpose(A))
 """
 Compute d-lag finite difference of a vector or matrix (in row direction).
 """
-function lagdiff(X::AbstractVecOrMat{<:Number}, d::Int, mode::Symbol=:causal)
+function lagdiff(X::AbstractVecOrMat{<:Number}, d::Integer, mode::Symbol=:causal)
     dX = fill(NaN, size(X))
     if ndims(X) == 1
         dX[d+1:end] = X[d+1:end]-X[1:end-d]
@@ -240,7 +240,7 @@ end
 
 ###### Time series manipulation ######
 
-function ffill!(X::AbstractVector{T}) where T<:Number
+function ffill!(X::AbstractVector{<:Number})
     for n=2:length(X)
         if ismissing(X[n]) || isnan(X[n])
             X[n] = X[n-1]
@@ -251,7 +251,7 @@ end
 
 ffill(X) = ffill!(copy(X))
 
-function bfill!(X::AbstractVector{T}) where T<:Number
+function bfill!(X::AbstractVector{<:Number})
     for n=length(X)-1:-1:1
         if ismissing(X[n]) || isnan(X[n])
             X[n] = X[n+1]

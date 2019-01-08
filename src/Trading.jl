@@ -72,7 +72,7 @@ The unitary rolling order consists in holding a unitary asset for only one time 
 - position: :long, :short or :both
 
 # Returns
-A, B: the series of ask and bid orders, which is one element longer than the input `R`.
+A, B: the series of ask and bid orders, which is `d` elements longer than the input `R`.
 """
 function make_unitary_rolling_orders(R::AbstractVector{<:Real}, d::Integer, C::Real; position::Symbol=:both)
     # @assert C>0
