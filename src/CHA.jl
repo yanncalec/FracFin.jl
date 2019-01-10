@@ -57,16 +57,17 @@ end
 
 
 """
-    fullpast_filtration(X::AbstractVector{<:Number}, filters::AbstractVector, n::Integer=1; method::Symbol=:recursive)
+    fullpastfilt(X::AbstractVector{<:Number}, filters::AbstractVector)
+
 """
-function fullpast_filtration(X::AbstractVector{<:Number}, filters::AbstractVector, n::Integer=1; method::Symbol=:recursive)
+function fullpastfilt(X::AbstractVector{<:Number}, filters::AbstractVector, n::Integer=2, method::Symbol=:recursive)
     @assert length(X) >= length(filters)
 #     Φ = V -> vcat(V[1], [sum(V[1:t].*filters[t]) for t=1:length(filters)])
     Φ = V -> [sum(V[1:t].*filters[t]) for t=1:length(filters)]
     Xϕ = Φ(X)
-    X1 = copy(X)
 
-    # phase-lag correction
+    # Experimental: phase-lag correction
+    X1 = copy(X)    
     for t=2:n
         if method==:recursive
             X1 += X - Xϕ
@@ -75,11 +76,14 @@ function fullpast_filtration(X::AbstractVector{<:Number}, filters::AbstractVecto
         end
         Xϕ = Φ(X1)
     end
+
     return Xϕ
 end
 
 
 """
+    conv_operator(X::AbstractVector{<:Real}, A::AbstractVector{<:Real}, b::Real=0.; nan::Symbol=:zero, mode::Symbol=:causal)
+
 Apply the convolution kernel `A` and bias `b` to the input vector `X` and yield `A * X + b`.
 """
 function conv_operator(X::AbstractVector{<:Real}, A::AbstractVector{<:Real}, b::Real=0.; nan::Symbol=:zero, mode::Symbol=:causal)

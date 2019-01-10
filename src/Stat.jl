@@ -268,8 +268,8 @@ end
 
 function exponential_moving_average!(X::AbstractVector{<:Number}, α::Real)
     # @assert 0<α<=1
-    for t=2:size(X,1)
-        X[t] = α * X[t] + (1-α) * X[t-1]
+    for t=2:size(X,1)        
+        X[t] = α * X[t] + (1-α) * (isnan(X[t-1]) ? 0. : X[t-1])  # NaN safe
     end
     return X
 end
@@ -277,7 +277,8 @@ end
 function exponential_moving_average!(X::AbstractMatrix{<:Number}, α::Real)
     # @assert 0<α<=1
     for t=2:size(X,1)
-        X[t,:] = α * X[t,:] + (1-α) * X[t-1,:]
+        V = X[t-1,:]; V[findall(isnan.(V))] = 0.  # NaN safe
+        X[t,:] = α * X[t,:] + (1-α) * V
     end
     return X
 end
