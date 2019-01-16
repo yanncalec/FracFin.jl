@@ -1,6 +1,53 @@
 ######### Estimators for fBm and related processes #########
 
 ###### Power law estimator ######
+
+@doc raw"""
+Power-law estimator using expectation.
+
+# Args
+- yp: the vector of expectation $Y = \mathbf{E}[|\Delta_\delta B|^p]$
+"""
+function powlaw_estim_from_expectation(yp::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}; p::Real=2., method::Symbol=:optim)
+    @assert length(lags) == length(yp) > 1
+    @assert all(lags .>= 1)
+
+    xp = p * log.(lags)
+
+    hurst, η = NaN, NaN
+    
+    # estimation of H and η
+    if method==:optim
+        yc = yp .- mean(yp)
+        xc = xp .- mean(xp)
+        func = h -> 1/2 * sum((yc - h*xc).^2)
+        # Gradient-free constrained optimization
+        ɛ = 1e-2  # search hurst in the interval [ɛ, 1-ɛ]
+        opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+        # # Gradient-based optimization
+        # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+        # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+        hurst = Optim.minimizer(opm)[1]
+        η = mean(yp - hurst*xp)
+    elseif method==:lm  # linear model by hand
+        # by manual inversion
+        Ap = hcat(xp, ones(length(xp))) # design matrix
+        hurst, η = Ap \ yp
+    elseif method==:glm  # using GLM package, same as lm
+        dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
+        opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
+        η, hurst = GLM.coef(opm)
+    else
+        error("Unknown method $(method).")
+    end
+    
+    cp = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)  # constant depending on p
+    σ = exp((η-log(cp))/p)
+    
+    return hurst, σ
+end
+
+
 """
 Power-law estimator for Hurst exponent and volatility.
 
@@ -17,13 +64,13 @@ X = (x_k)_k, with x_k := p * log(k)
 - hurst, σ, obj: estimation of Hurst and volatility, as well as an object of optimizer.
 
 # Notes
-- `X` is computed from fBm by taking finite differences. The second dimension corresponds to time. Example, let `B` be a fBm sample path then the following command computes `X`:
+- `X` is computed from fBm by taking finite differences. The second dimension corresponds to time. Example, let `W` be a fBm sample path then the following command computes `X`:
 ```julia
 julia> lags = 2:10
 julia> X = transpose(lagdiff(W, lags, :causal))
 ```
 - `p=1` is robust against quantization error.
-- Using a non-zero `kt` puts more weight on most recent samples (i.e. those at large column numbers).
+- A non-zero `kt` puts more weight on most recent samples (i.e. those at large column numbers).
 """
 function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}; p::Real=2., kt::Integer=0)
     @assert length(lags) == size(X,1) > 1
@@ -403,11 +450,46 @@ end
 #### fGn-MLE ####
 # A special case of fWn-MLE which deserves it own implementation.
 
-function fGn_log_likelihood_H(X::AbstractVecOrMat{T}, H::Real, d::Int) where {T<:Real}
-    Σ = covmat(FractionalGaussianNoise(H, d), size(X,1))
+# function fGn_log_likelihood_H(X::AbstractVecOrMat{T}, H::Real, d::Int) where {T<:Real}
+#     Σ = covmat(FractionalGaussianNoise(H, d), size(X,1))
+#     return log_likelihood_H(Σ, X)
+# end
+
+# function fGn_MLE_estim(X::AbstractVecOrMat{<:Real}, d::Integer; method::Symbol=:optim, ε::Real=1e-2)
+#     # @assert 0. < ε < 1.
+#     func = h -> -fGn_log_likelihood_H(X, h, d)
+
+#     opm = nothing
+#     hurst = nothing
+
+#     if method == :optim
+#         # Gradient-free constrained optimization
+#         opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+#         # # Gradient-based optimization
+#         # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+#         # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+#         hurst = Optim.minimizer(opm)[1]
+#     elseif method == :table
+#         Hs = collect(ε:ε:1-ε)
+#         hurst = Hs[argmin([func(h) for h in Hs])]
+#     else
+#         throw("Unknown method: ", method)
+#     end
+
+#     # Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(hurst, 1.), size(X,1))))
+#     Σ = Matrix(Symmetric(fGn_covmat(size(X,1), hurst, d)))
+#     σ = sqrt(xiAx(Σ, X) / length(X))
+#     L = log_likelihood_H(Σ, X)
+
+#     return hurst, σ, L, opm
+# end
+
+
+function fGn_log_likelihood_H(X::AbstractVecOrMat{T}, H::Real, d::Int, G::AbstractVector{<:Integer}=Int[]) where {T<:Real}
+    proc = FractionalGaussianNoise(H, d)
+    Σ::AbstractMatrix = length(G)>0 ? covmat(proc, G) : covmat(proc, size(X,1))
     return log_likelihood_H(Σ, X)
 end
-
 
 """
 Maximum likelihood estimation of Hurst exponent and volatility for fractional Gaussian noise.
@@ -418,14 +500,20 @@ Maximum likelihood estimation of Hurst exponent and volatility for fractional Ga
 - method, ε: see `fWn_MLE_estim()`.
 
 # Notes
+- The MLE is known for its sensitivivity to mis-specification of model. In particular the fGn-MLE is sensitive to NaN value and outliers.
 """
-function fGn_MLE_estim(X::AbstractVecOrMat{<:Real}, d::Integer; method::Symbol=:optim, ε::Real=1e-2)
+function fGn_MLE_estim(X::AbstractVecOrMat{<:Real}, d::Integer, G::AbstractVector{<:Integer}=Int[]; method::Symbol=:optim, ε::Real=1e-2)
     # @assert 0. < ε < 1.
-    func = h -> -fGn_log_likelihood_H(X, h, d)
+    if length(G)>0
+        @assert length(G) == size(X,1)
+        @assert minimum(abs.(diff(sort(G)))) > 0  # all elements are distinct
+    end
 
+    func = h -> -fGn_log_likelihood_H(X, h, d, G)
+    
     opm = nothing
     hurst = nothing
-
+    
     if method == :optim
         # Gradient-free constrained optimization
         opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
@@ -439,14 +527,15 @@ function fGn_MLE_estim(X::AbstractVecOrMat{<:Real}, d::Integer; method::Symbol=:
     else
         throw("Unknown method: ", method)
     end
-
+    
     # Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(hurst, 1.), size(X,1))))
     Σ = Matrix(Symmetric(fGn_covmat(size(X,1), hurst, d)))
     σ = sqrt(xiAx(Σ, X) / length(X))
     L = log_likelihood_H(Σ, X)
-
+    
     return hurst, σ, L, opm
 end
+
 
 
 """

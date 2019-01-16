@@ -266,23 +266,28 @@ end
 
 ###### Online Statistics ######
 
-function exponential_moving_average!(X::AbstractVector{<:Number}, α::Real)
-    # @assert 0<α<=1
-    for t=2:size(X,1)        
-        X[t] = α * X[t] + (1-α) * (isnan(X[t-1]) ? 0. : X[t-1])  # NaN safe
+# function exponential_moving_average!(X::AbstractVector{<:Number}, α::Real)
+#     # @assert 0<α<=1
+#     for t=2:size(X,1)        
+#         X[t] = α * X[t] + (1-α) * (isnan(X[t-1]) ? 0. : X[t-1])  # NaN safe
+#     end
+#     return X
+# end
+
+function exponential_moving_average!(X::AbstractVecOrMat{<:Number}, α::Real)
+    @assert 0<α<=1
+    X[findall(isnan.(X))] .= 0.  # NaN safe
+    
+    for t=2:size(X,1)  # first axis is the time
+        W = view(X,t,:)
+        W .= α * W + (1-α) * view(X,t-1,:)
     end
     return X
 end
 
-function exponential_moving_average!(X::AbstractMatrix{<:Number}, α::Real)
-    # @assert 0<α<=1
-    for t=2:size(X,1)
-        V = X[t-1,:]; V[findall(isnan.(V))] = 0.  # NaN safe
-        X[t,:] = α * X[t,:] + (1-α) * V
-    end
-    return X
-end
-
+"""
+EMA of a vector or a matrix (in row direction).
+"""
 function exponential_moving_average(X::AbstractVecOrMat{<:Number}, α::Real, n::Integer=1)
     @assert 0<α<=1
     X1 = copy(X)
@@ -298,21 +303,33 @@ function exponential_moving_average(X::AbstractVecOrMat{<:Number}, α::Real, n::
     return Xm
 end
 
-function simple_moving_average!(X::AbstractVector{<:Number}, n::Integer)
+
+# function simple_moving_average!(X::AbstractVector{<:Number}, n::Integer)
+#     @assert n>0
+#     for t=2:size(X,1)
+#         X[t] = (X[t] + X[t-1] * min(n, t-1) - (t>n ? X[t-n] : 0)) / min(n, t)
+#     end
+#     return X
+# end
+
+function simple_moving_average(X0::AbstractVecOrMat{<:Number}, n::Integer)
     @assert n>0
+    
+    X1 = copy(X0)  # X0 must be saved in the causal implementation
+    X1[findall(isnan.(X1))] .= 0.  # NaN safe
+    X = copy(X1)
+
+    for t=2:n
+        X[t,:] .= (X[t,:] + X[t-1,:] * (t-1)) / t
+    end
+    for t=n+1:size(X,1)
+        X[t,:] .= (X[t,:] + X[t-1,:] * n - X1[t-n,:]) / n
+    end
     for t=2:size(X,1)
-        X[t] = (X[t] + X[t-1] * min(n, t-1) - (t>n ? X[t-n] : 0)) / min(n, t)
+        W = view(X,t,:)
+        W .= (W + view(X,t-1,:) * min(n, t-1) .- (t>n ? view(X1,t-n,:) : 0)) / min(n, t)
+        # # equivalent to
+        # X[t,:] .= (X[t,:] + X[t-1,:] * min(n, t-1) .- (t>n ? X[t-n,:] : 0)) / min(n, t)
     end
     return X
 end
-
-function simple_moving_average!(X::AbstractMatrix{<:Number}, n::Integer)
-    @assert n>0
-    for t=2:size(X,1)
-        # X[t,:] = mean(X[max(1,t-n+1):t,:], dims=1)
-        X[t,:] = (X[t,:] + X[t-1,:] * min(n, t-1) - (t>n ? X[t-n,:] : zero(X[1,:]))) / min(n, t)
-    end
-    return X
-end
-
-simple_moving_average(X::AbstractVecOrMat{<:Number}, n::Integer) = simple_moving_average!(copy(X), n)
