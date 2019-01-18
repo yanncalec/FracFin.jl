@@ -97,72 +97,6 @@ function powlaw_estim(X::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}
 end
 
 
-"""
-Power-law estimator and predictor.
-
-# Args
-- X: input matrix. The first row is the observation of fBm and the others are fGn
-- lags: integer time lags (increment step) used to compute each component of `X` starting from the second row. Values in `lags` must be all distinct.
-- s: time lag for prediction
-- d: (average) downsampling factor
-
-# Returns
-- H, σ, (μr, Vr), (μy, Vy): estimation of hurst, volatility, conditional mean and covariance of fGn and fBm.
-
-# Notes
-- This function is intended to be used with `rolling_apply` where `X` is some observation on a time window. - The time arrow is on the second dimension (i.e. horizontal) from left to right.
-- μr and
-
-"""
-function powlaw_estim_predict(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}, s::Integer, d::Integer, k::Integer=0; kwargs...)
-    # @assert s in lags
-    # @assert "all values in lags must be distinct"
-
-    N = size(X, 2)  # number of rows
-    Y = view(X, 1, :)  # first row is an observation of fBm
-    R = view(X, 2:size(X,1), :)  # the other rows are observations of fGn, corresponding to `lags`
-    sidx = findall(lags.==s)[1]  # index of `s` in `lags`
-
-    H, σ, opm = powlaw_estim(R, lags; kwargs...)
-
-    # convention of time arrow: from left to right
-    # method 1: logscale downsampling
-    tidx0 = findall(reverse(logtrain(N, N÷d)))
-    # @assert k <= length(tidx0)
-    tidx = k>0 ? tidx0[end-k+1:end] : tidx0  # select the last k samples
-    S = R[sidx,tidx]
-
-    # # method 2: regular downsampling with averaging
-    # S0 = mean(vec2mat(R[sidx,:], d, keep=:tail), dims=1)[:]
-    # # S0 = transpose(vec2mat(R[sidx,:], d, keep=:tail))[1,:]
-    # S = k>0 ? S0[end-k+1:end] : S0
-    # tidx = d*(1:size(S,1))
-
-    # conditional mean and covariance
-    G = tidx[end]+1:tidx[end]+s  # grid of prediction
-    # fGn: `S` is the observation of fGn corresponding to `s`
-    μr, Σr = cond_mean_cov(FractionalGaussianNoise(H, s), G, tidx, S)
-    # fBm: `Y` is the observation of fBm
-    μy, Σy = cond_mean_cov(FractionalBrownianMotion(H), G, tidx, Y[tidx])
-
-    return H, σ, (μr, σ^2*Σr), (μy, σ^2*Σy)
-end
-
-
-# """
-# EXPERIMENTAL: prediction by recursive conditional mean
-# No visible improvements over classical conditional mean for long range prediction.
-# """
-# function powlaw_estim_predict(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}, s::Integer, k::Integer; kwargs...)
-#     # @assert k>0 && d>0
-#     H, σ, opm = FracFin.powlaw_estim(X, lags; kwargs...)
-#     l = size(X,2)÷4
-#     Cv = cond_mean_coeff(FractionalGaussianNoise(H, lags[s]), k, l)
-#     μc = Cv * X[s, end-l+1:end]
-#     return H, σ, μc
-# end
-
-
 ####### Generalized scalogram #######
 
 """
@@ -298,14 +232,16 @@ end
 
 
 """
-Safe evaluation of the log-likelihood of a fBm model with the implicit optimal σ (in the MLE sense).
+    log_likelihood_H(A, X)
+
+Safe evaluation of the log-likelihood of a fBm model with the implicit σ (optimal in the MLE sense).
 
 The value of log-likelihood (up to some additive constant) is
     -1/2 * (N*log(X'*inv(A)*X) + logdet(A))
 
 # Args
 - A: covariance matrix
-- X: sample matrix, each column is one sample.
+- X: sample vector or matrix. For matrix each column is a sample.
 
 # Notes
 - This function is common to all MLEs with the covariance matrix of form `σ²A(h)`, where `{σ, h}` are unknown parameters. This kind of MLE can be carried out in `h` uniquely and `σ` is obtained from `h`.
@@ -347,43 +283,53 @@ end
 log_likelihood(A::AbstractMatrix, X::AbstractVector) = log_likelihood(A, reshape(X,:,1))
 
 
-#### fWn-MLE ####
-# A fWn is the filtration of a fBm time series by a bank of high pass filters, e.g., multiscale wavelet filters.
+#### fWnb-MLE ####
 
 """
 Safe evaluation of the log-likelihood of a fWm model with the implicit optimal σ (in the MLE sense).
 """
-function fWn_log_likelihood_H(X::AbstractVecOrMat{<:Real}, F::AbstractVector{<:AbstractVector{<:Real}}, H::Real)
-    @assert 0 < H < 1
-    @assert size(X,1) % length(F) == 0  #
+function fWnb_log_likelihood_H(X::AbstractVecOrMat{<:Real}, F::AbstractVector{<:AbstractVector{<:Real}}, H::Real, G::AbstractVector{<:Integer}=Int[])
+    proc = FractionalWaveletNoiseBank(H, F)
 
-    Σ = Matrix(Symmetric(fWn_covmat(F, size(X,1)÷length(F)-1, H)))
+    # covariance matrix of fWnb
+    Σ::AbstractMatrix = if length(G)>0
+        @assert size(X,1) = length(F) * length(G)
+        fWnb_covmat(proc, G)
+    else 
+        fWnb_covmat(proc, size(X,1)÷length(F)-1)  # max time lag
+    end
     return log_likelihood_H(Σ, X)
 end
 
 
 """
-General fWn-MLE of Hurst exponent and volatility.
+Maximum likelihood estimation of Hurst exponent and volatility for fractional wavelet noise bank (fWnb).
 
 # Args
-- X: transformed coefficients, each column is a vector of coefficient; or concatenation of vectors.
-- F: array of filters, each corresponding to a row in X
+- X: sample vector or matrix
+- F: array of filters
+- G: integer time grid of `X`, by default the regular grid is used.
 - method: :optim for optimization based or :table for look-up table based solution.
 - ε: this defines the bounded constraint [ε, 1-ε], and for method==:table this is also the step of search for Hurst exponent.
 
 # Returns
-- (hurst, σ): estimation
+- hurst, σ: estimation
 - L: log-likelihood of estimation
 - opm: object of optimizer, for method==:optim only
 
 # Notes
-- X can also be the concatenation of vectors at at consecutive instants.
+- The fWnb process is multivariate. An observation at time `t` is a `d`-dimensional vector, where `d` equals to the number of filters used in fWnb. A vector `X` is the concatenation of observations made on some time grid `G`, while a matrix `X` is a collection of i.i.d. sample vectors. Hence the row dimension of `X` must be `length(F) * length(G)`, if `G` is ever provided. 
 """
-function fWn_MLE_estim(X::AbstractVecOrMat{T}, F::AbstractVector{<:AbstractVector{T}}; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
-    @assert 0. < ε < 1.
-    @assert size(X,1) % length(F) == 0
+function fWnb_MLE_estim(X::AbstractVecOrMat{T}, F::AbstractVector{<:AbstractVector{T}}, G::AbstractVector{<:Integer}=Int[]; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
+    # @assert 0. < ε < 1.
+    if length(G)>0
+        @assert size(X,1) == length(F) * length(G)
+        @assert minimum(abs.(diff(sort(G)))) > 0  # all elements are distinct
+    else
+        @assert size(X,1) % length(F) == 0
+    end
 
-    func = h -> -fWn_log_likelihood_H(X, F, h)
+    func = h -> -fWn_log_likelihood_H(X, F, h, G)
 
     opm = nothing
     hurst = nothing
@@ -401,7 +347,8 @@ function fWn_MLE_estim(X::AbstractVecOrMat{T}, F::AbstractVector{<:AbstractVecto
     else
         throw("Unknown method: ", method)
     end
-
+    
+    Σ = fWnb_covmat(FractionalWaveletNoiseBank(hurst, F), size(X,1)÷length(F)-1)
     Σ = Matrix(Symmetric(fWn_covmat(F, size(X,1)÷length(F)-1, hurst)))
     σ = sqrt(xiAx(Σ, X) / length(X))
     L = log_likelihood_H(Σ, X)
@@ -410,10 +357,10 @@ function fWn_MLE_estim(X::AbstractVecOrMat{T}, F::AbstractVector{<:AbstractVecto
 end
 
 
-function fWn_swt_MLE_estim(X::AbstractVecOrMat{T}, wvl::String, level::Int; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
-    F = [_intscale_bspline_filter(s, v)/sqrt(s) for s in sclrng]  # extra 1/sqrt(s) factor due to the implementation of DCWT
-    return fWn_MLE_estim(X, F; method=method, ε=ε)
-end
+# function fWn_swt_MLE_estim(X::AbstractVecOrMat{T}, wvl::String, level::Int; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
+#     F = [_intscale_bspline_filter(s, v)/sqrt(s) for s in sclrng]  # extra 1/sqrt(s) factor due to the implementation of DCWT
+#     return fWn_MLE_estim(X, F; method=method, ε=ε)
+# end
 
 
 """
@@ -429,7 +376,6 @@ function fWn_bspline_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVector{In
     return fWn_MLE_estim(X, F; method=method, ε=ε)
 end
 # const fBm_bspline_MLE_estim = fWn_bspline_MLE_estim
-
 
 
 #### fGn-MLE ####
@@ -472,7 +418,14 @@ end
 
 function fGn_log_likelihood_H(X::AbstractVecOrMat{T}, H::Real, d::Int, G::AbstractVector{<:Integer}=Int[]) where {T<:Real}
     proc = FractionalGaussianNoise(H, d)
-    Σ::AbstractMatrix = length(G)>0 ? covmat(proc, G) : covmat(proc, size(X,1))
+
+    Σ::AbstractMatrix = if length(G)>0 
+        @assert length(G) == size(X,1)
+        covmat(proc, G) 
+    else 
+        covmat(proc, size(X,1))
+    end
+
     return log_likelihood_H(Σ, X)
 end
 
@@ -480,8 +433,9 @@ end
 Maximum likelihood estimation of Hurst exponent and volatility for fractional Gaussian noise.
 
 # Args
-- X: observation vector or matrix of a fGn process. For matrix input each column is an i.i.d. observation.
+- X: sample vector or matrix. 
 - d: time lag of the finite difference operator used for computing `X`.
+- G: integer time grid of `X`, by default the regular grid `1:size(X,1)` is used.
 - method, ε: see `fWn_MLE_estim()`.
 
 # Notes
@@ -522,7 +476,6 @@ function fGn_MLE_estim(X::AbstractVecOrMat{<:Real}, d::Integer, G::AbstractVecto
 end
 
 
-
 """
 Accelerated fGn-MLE by dividing a large vector of samples into smaller ones.
 
@@ -537,45 +490,9 @@ function fGn_MLE_estim(X::AbstractVector{<:Real}, d::Integer, s::Integer, l::Int
     return fGn_MLE_estim(V, d; kwargs...)
 end
 
-"""
-Maximum likelihood estimation and prediction of fGn.
-
-# Args
-- s,l: sub window size, length of decorrelation
-- k,u,n: number of samples, downsampling factor, step of prediction
-"""
-function fGn_MLE_estim_predict(X::AbstractVector{<:Real}, d::Integer, s::Integer, l::Integer, k::Integer, u::Integer, n::Integer; dmode::Symbol=:regular)
-    N = length(X)  # number of samples
-
-    # when sub window equals to rolling window then `rolling_vectorize()` has no effect
-    hurst, σ, L, opm = fGn_MLE_estim(X, d, s, l; method=:optim, ε=1e-2)
-
-    # convention of time arrow: from left to right
-    sgrid::AbstractVector{<:Integer} = Int[]  # grid of historical samples
-    S::AbstractVector{<:Real} = Real[]  # value of historical samples
-
-    if dmode == :logscale  # logscale downsampling
-        tidx = findall(reverse(logtrain(N, N÷u)))
-        # select the last k samples
-        sgrid = (k==0 || k>=length(tidx)) ? tidx : tidx[end-k+1:end]
-        S = X[sgrid]
-    else # regular downsampling
-        Sm = vec2mat(X, u, keep=:tail)
-        S0 = mean(Sm, dims=1)[:]
-        # S0 = Sm[1,:]
-        S = (k==0 || k>=length(S0)) ? S0 : S0[end-k+1:end]
-        sgrid = u*(1:size(S,1))
-    end
-
-    # conditional mean and covariance
-    pgrid = sgrid[end] .+ (1:n)  # grid of prediction
-    μ, Σ = cond_mean_cov(FractionalGaussianNoise(hurst, d), pgrid, sgrid, S)
-
-    return hurst, σ, μ, σ^2*Σ
-end
 
 
-"""
+"""TODO
 Multiscale fGn-MLE
 """
 function ms_fGn_MLE_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, w::Int) where {T<:Real}
