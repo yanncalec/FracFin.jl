@@ -82,7 +82,7 @@ with `l = lag(X)`.
 """
 function filter(X::DifferentialProcess)
     filt = vcat(1, zeros(lag(X)-1), -1)
-    return causal(X) ? filt : reverse(filt)
+    return iscausal(X) ? filt : reverse(filt)
 end
 
 """
@@ -147,7 +147,7 @@ autocov(X::StationaryProcess{T}, t::T, s::T) where T<:TimeStyle = autocov(X, t-s
 """
 Compute the auto-covariance matrix of a stochastic process on a sampling grid.
 """
-function autocov!(C::Matrix{<:AbstractFloat}, X::StochasticProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle
+function autocov!(C::Matrix{<:Real}, X::StochasticProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle
     @assert size(C, 1) == size(C, 2) == length(G)
 
     # construct the covariance matrix (a symmetric matrix)
@@ -161,7 +161,7 @@ function autocov!(C::Matrix{<:AbstractFloat}, X::StochasticProcess{T}, G::Abstra
     return Symmetric(C)
 end
 
-function autocov!(C::Matrix{<:AbstractFloat}, X::StochasticProcess{T}, G1::AbstractVector{<:T}, G2::AbstractVector{<:T}) where T<:TimeStyle
+function autocov!(C::Matrix{<:Real}, X::StochasticProcess{T}, G1::AbstractVector{<:T}, G2::AbstractVector{<:T}) where T<:TimeStyle
     @assert size(C, 1) == length(G1) && size(C, 2) == length(G2)
 
     # construct the covariance matrix (a symmetric matrix)
@@ -176,7 +176,7 @@ end
 """
 Compute the auto-covarince sequence of a stationary process on a regular grid.
 """
-function autocov!(C::AbstractVector{<:AbstractFloat}, X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle
+function autocov!(C::AbstractVector{<:Real}, X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle
     # @assert isregulargrid(G)
     @assert length(C) == length(G)  # check dimension
 
@@ -196,7 +196,7 @@ Return the auto-covariance sequence of a stationary process on a regular grid.
 covseq(X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle = autocov!(zeros(length(G)), X, G)
 
 
-function autocov!(C::Matrix{<:AbstractFloat}, X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle
+function autocov!(C::Matrix{<:Real}, X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle
     # check dimension
     @assert size(C, 1) == size(C, 2) == length(G)
     # println("autocov! of StationaryProcess, $(ss_exponent(X))")
@@ -206,7 +206,7 @@ function autocov!(C::Matrix{<:AbstractFloat}, X::StationaryProcess{T}, G::Abstra
         covmat!(C, covseq(X,G))
     else
         # if G is not regular the `covseq` can not be applied, invoke the function of `StochasticProcess`.
-        invoke(autocov!, Tuple{Matrix{<:AbstractFloat}, StochasticProcess{S}, AbstractVector{<:S}} where S<:TimeStyle, C, X, G)
+        invoke(autocov!, Tuple{Matrix{<:Real}, StochasticProcess{S}, AbstractVector{<:S}} where S<:TimeStyle, C, X, G)
     end
 end
 
@@ -238,10 +238,10 @@ The `(i,j)`-th coefficient in the matrix is `autocov(G1[i], G2[j])`.
 covmat(X::StochasticProcess, G1::AbstractVector, G2::AbstractVector) = autocov!(zeros(length(G1), length(G2)), X, G1, G2)
 
 """
-Return the auto-covarince matrix of a stochastic process on an integer sampling grid.
+Return the auto-covarince matrix of a stationary process on an integer sampling grid.
 """
-covmat(X::StochasticProcess, N::Integer) = covmat(X, 1:N)
-covmat(X::StochasticProcess, N::Integer, M::Integer) = covmat(X, 1:N, 1:M)
+covmat(X::StationaryProcess, N::Integer) = covmat(X, 1:N)
+covmat(X::StationaryProcess, N::Integer, M::Integer) = covmat(X, 1:N, 1:M)
 
 
 """
@@ -253,7 +253,7 @@ partcorr(X::DiscreteTimeStationaryProcess, n::DiscreteTime) = throw(NotImplement
 """
 Compute the partial correlation sequence of a discrete time stationary process on a regular integer sampling grid.
 """
-function partcorr!(C::Vector{<:AbstractFloat}, X::DiscreteTimeStationaryProcess, G::AbstractVector{<:DiscreteTime})
+function partcorr!(C::Vector{<:Real}, X::DiscreteTimeStationaryProcess, G::AbstractVector{<:DiscreteTime})
     # check dimension
     @assert length(C) == length(G)
     @assert isregulargrid(G)
