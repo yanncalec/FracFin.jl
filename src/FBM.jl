@@ -94,7 +94,7 @@ Kpmm(x, t, H) = Kplus(x, t, H) - Kminus(x, t, H)
 Fractional Gaussian noise (fGn) is the discrete time version of the continuous time differential process of a fBm: $ B(t+\delta) - B(t) $.  It is defined as $ B(n+l) - B(n) $, where `l` is the lag.
 
 # Note
-- We adopt the anti-causal convention in the definition here.
+- The anti-causal convention adopted by the definition here has no impact since the process is stationary.
 """
 struct FractionalGaussianNoise <: IncrementProcess{FractionalBrownianMotion}
     parent_process::FractionalBrownianMotion
@@ -144,64 +144,143 @@ fGn_covmat(N::Integer, H::Real, d::Integer) = fGn_covmat(1:N, H, d)
 
 
 ######## Fractional Wavelet noise (fWn) ########
-"""
-Fractional Wavelet noise.
 
-fWn is the wavelet-filtered process of fBm.
+@doc raw"""
+Fractional Wavelet noise (fWn).
+
+fWn is the filtered process of fBm by some high-pass banc filters, e.g. wavelet filters.
+
+$$
+W(t) = \sum_{n=0}^{p-1} B(t-n\delta) \psi[n]
+$$
 """
-struct FractionalWaveletNoise <: FilteredProcess{ContinuousTime, FractionalBrownianMotion}
+struct FractionalWaveletNoise <: FilteredProcess{DiscreteTime, FractionalBrownianMotion}
     parent_process::FractionalBrownianMotion
-    filter::AbstractVector
+    filter::AbstractVector{<:Real}
+    coeff::AbstractVector{<:Real}  # coefficients for the summation of |t - d*l|^(2H)
 
     function FractionalWaveletNoise(hurst::Real, filter::AbstractVector{<:Real})
-        @assert isapprox(sum(filter), 0.; atol=1e-10)  # filter must be high pass
-        new(FractionalBrownianMotion(hurst), filter)
+        @assert isapprox(sum(filter), 0; atol=1e-8) "Filter must not contain DC."
+        new(FractionalBrownianMotion(hurst), filter, fWn_cov_coeff(filter))
     end
 end
 
 ss_exponent(X::FractionalWaveletNoise) = X.parent_process.hurst
-
 filter(X::FractionalWaveletNoise) = X.filter
+step(X::FractionalWaveletNoise) = 1
 
+function fWn_cov_coeff(u::AbstractVector{<:Real}, v::AbstractVector{<:Real})
+    m = length(u)
+    n = length(v)
 
-
-#### TODO : fWn ####
-
-fWn_autocov = () -> NaN
-
-
-"""
-Compute the covariance matrix of a fWn at some time lag.
-
-# Args
-- F: array of band pass filters (no DC component)
-- d: time lag
-- H: Hurst exponent
-"""
-function fWn_covmat_lag(F::AbstractVector{<:AbstractVector{T}}, d::DiscreteTime, H::Real) where {T<:Real}
-    L = maximum([length(f) for f in F])  # maximum length of filters
-    # M = [abs(d+(n-m))^(2H) for n=0:L-1, m=0:L-1]  # matrix comprehension is ~ 10x slower
-    M = zeros(L,L)
-    for n=1:L, m=1:L
-        M[n,m] = abs(d+(n-m))^(2H)
+    w = zeros(promote_type(eltype(u),eltype(v)), m+n-1)
+    for j=1:m, k=1:n
+        w[j-k+n] += u[j] * v[k]  # corresponding to the range 1-n:m-1
     end
-    Σ = -1/2 * [f' * view(M, 1:length(f), 1:length(g)) * g for f in F, g in F]
+    return -w/2  # factor -1/2 comes from the covariance of fBm
+end
+
+fWn_cov_coeff(u::AbstractVector{<:Real}) = fWn_cov_coeff(u, u)
+
+"""
+Autocovariance function of stardard (continuous time) fWn.
+"""
+function fWn_autocov(X::FractionalWaveletNoise, t::Real, δ::Real)
+    n = length(X.filter)
+    return sum(X.coeff .* abs.(t.-δ*(1-n:n-1)).^(2*ss_exponent(X)))
+end
+
+function autocov(X::FractionalWaveletNoise, n::Integer)
+    fWn_autocov(X, n, 1)
 end
 
 
-"""
-Compute the covariance matrix of a time-concatenated fWn.
-"""
-function fWn_covmat(F::AbstractVector{<:AbstractVector{T}}, lmax::Int, H::Real) where {T<:Real}
-    J = length(F)
-    Σ = zeros(((lmax+1)*J, (lmax+1)*J))
-    Σs = [fWn_covmat_lag(F, d, H) for d = 0:lmax]
-
-    for r = 0:lmax
-        for c = 0:lmax
-            Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (c>=r) ? Σs[c-r+1] : transpose(Σs[r-c+1])
-        end
+function fWn_covmat(X::FractionalWaveletNoise, G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, δ::Real)
+    Σ = zeros(length(G1),length(G2))
+    for (c,s) in enumerate(G2), (r,t) in enumerate(G1)
+        Σ[r,c] = fWn_autocov(X, t-s, δ)
     end
-
-    return Matrix(Symmetric(Σ))  #  forcing symmetry
+    return Σ
 end
+
+fWn_covmat(X::FractionalWaveletNoise, G::AbstractVector{<:Real}, δ::Real) = Matrix(Symmetric(fWn_covmat(X, G, G, δ)))
+
+
+const MultiScaleFractionalWaveletNoise = Vector{FractionalWaveletNoise}
+const msfWn = MultiScaleFractionalWaveletNoise
+
+# fWn_cov_coeff(F::AbstractVector{<:AbstractVector}) = [(fWn_cov_coeff(u,v), (1-length(v):length(u)-1)) for u in F, v in F]
+
+# struct FractionalWaveletNoise <: FilteredProcess{ContinuousTime, FractionalBrownianMotion}
+#     parent_process::FractionalBrownianMotion
+#     filters::AbstractVector{<:AbstractVector{<:Real}}
+#     coeff::AbstractMatrix  # pair coefficients for the summation of |t - d*l|^(2H)
+
+#     function FractionalWaveletNoise(hurst::Real, filters::AbstractVector)
+#         @assert all(isapprox(sum(f), 0; atol=1e-8) for f in filters) "Filters must not contain DC."
+#         new(FractionalBrownianMotion(hurst), filters, fWn_cov_coeff(filters))
+#     end
+# end
+
+# function fWn_autocov(X::FractionalWaveletNoise, t::Real, δ::Real)
+#     H = ss_exponent(X)
+#     Σ = zeros(Real, size(X.coeff))
+#     for r=1:length(X.filters), c=1:length(X.filters)
+#         α, k = X.coeff[r,c]
+#         Σ[r,c] = sum(α .* abs.(t-δ*k)^(2H))
+#     end
+#     return Σ
+# end
+
+
+# function fWn_covmat(X::FractionalWaveletNoise, G::Integer)
+#     J = length(X.filters)
+#     Σ = zeros(((lmax+1)*J, (lmax+1)*J))
+#     Σs = [fWn_autocov(X, d, 1) for d = 0:lmax]
+
+#     for r = 0:lmax
+#         for c = 0:lmax
+#             Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (c>=r) ? Σs[c-r+1] : transpose(Σs[r-c+1])
+#         end
+#     end
+
+#     return Matrix(Symmetric(Σ))  #  forcing symmetry
+# end
+
+
+########################################################
+# """
+# Compute the covariance matrix of a fWn at some time lag.
+
+# # Args
+# - F: array of band pass filters (no DC component)
+# - d: time lag
+# - H: Hurst exponent
+# """
+# function fWn_covmat_lag(F::AbstractVector{<:AbstractVector{T}}, d::DiscreteTime, H::Real) where {T<:Real}
+#     L = maximum([length(f) for f in F])  # maximum length of filters
+#     # M = [abs(d+(n-m))^(2H) for n=0:L-1, m=0:L-1]  # matrix comprehension is ~ 10x slower
+#     M = zeros(L,L)
+#     for n=1:L, m=1:L
+#         M[n,m] = abs(d+(n-m))^(2H)
+#     end
+#     Σ = -1/2 * [f' * view(M, 1:length(f), 1:length(g)) * g for f in F, g in F]
+# end
+
+
+# """
+# Compute the covariance matrix of a time-concatenated fWn.
+# """
+# function fWn_covmat(F::AbstractVector{<:AbstractVector{T}}, lmax::Int, H::Real) where {T<:Real}
+#     J = length(F)
+#     Σ = zeros(((lmax+1)*J, (lmax+1)*J))
+#     Σs = [fWn_covmat_lag(F, d, H) for d = 0:lmax]
+
+#     for r = 0:lmax
+#         for c = 0:lmax
+#             Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (c>=r) ? Σs[c-r+1] : transpose(Σs[r-c+1])
+#         end
+#     end
+
+#     return Matrix(Symmetric(Σ))  #  forcing symmetry
+# end

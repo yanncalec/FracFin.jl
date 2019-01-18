@@ -123,6 +123,19 @@ end
 pca(X::AbstractMatrix, nc::Int, center=false) = pca(X, nc, StatsBase.weights(ones(size(X,1))), center)
 
 
+"""
+    moment_incr(X::AbstractVector{<:Number}, d::Integer, p::Real, w=StatsBase.AbstractWeights[])
+
+Comput the `p`-th moment for the increment vector of `X` with lag `d`.
+"""
+function moment_incr(X::AbstractVector{<:Number}, d::Integer, p::Real, w=StatsBase.AbstractWeights[])
+    return if length(w) > 0
+        mean((abs.(X[d+1:end] - X[1:end-d])).^p, w)
+    else
+        mean((abs.(X[d+1:end] - X[1:end-d])).^p)
+    end
+end
+
 ######## Linear models ########
 """
 Multi-linear regression in the column direction.
@@ -268,7 +281,7 @@ end
 
 # function exponential_moving_average!(X::AbstractVector{<:Number}, α::Real)
 #     # @assert 0<α<=1
-#     for t=2:size(X,1)        
+#     for t=2:size(X,1)
 #         X[t] = α * X[t] + (1-α) * (isnan(X[t-1]) ? 0. : X[t-1])  # NaN safe
 #     end
 #     return X
@@ -277,7 +290,7 @@ end
 function exponential_moving_average!(X::AbstractVecOrMat{<:Number}, α::Real)
     @assert 0<α<=1
     X[findall(isnan.(X))] .= 0.  # NaN safe
-    
+
     for t=2:size(X,1)  # first axis is the time
         W = view(X,t,:)
         W .= α * W + (1-α) * view(X,t-1,:)
@@ -314,7 +327,7 @@ end
 
 function simple_moving_average(X0::AbstractVecOrMat{<:Number}, n::Integer)
     @assert n>0
-    
+
     X1 = copy(X0)  # X0 must be saved in the causal implementation
     X1[findall(isnan.(X1))] .= 0.  # NaN safe
     X = copy(X1)

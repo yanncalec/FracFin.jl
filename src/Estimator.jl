@@ -1,21 +1,65 @@
 ######### Estimators for fBm and related processes #########
 
+
 ###### Power law estimator ######
 
 @doc raw"""
-Power-law estimator using expectation.
+Power-law estimator for Hurst exponent and volatility.
+
+Y = (y_k)_k, with y_k := 𝐄[|Δ_{kδ} B^{H}(t)|^p]
+X = (x_k)_k, with x_k := p * log(k)
 
 # Args
-- yp: the vector of expectation $Y = \mathbf{E}[|\Delta_\delta B|^p]$
+- X: Matrix of fGn, each row is a fGn of some time lag and each column is an observation.
+- lags: time lags (increment step) used to compute each component of `X`
+- p: power of the moment
+- methods: method of estimation: {:optim, :lm, :glm}
+
+# Returns
+- hurst, σ: estimation of Hurst and volatility, as well as an object of optimizer
+- (xp, yp): vectors of regression
+
+# Notes
+- `X` is computed from fBm by taking finite differences. The second dimension corresponds to time. Example, let `W` be a fBm sample path then the following command computes `X`:
+```julia
+julia> lags = 2:10
+julia> X = transpose(lagdiff(W, lags, :causal))
+```
+- `p=1` is robust against quantization error.
+- A non-zero `kt` puts more weight on most recent samples (i.e. those at large column numbers).
 """
-function powlaw_estim_from_expectation(yp::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}; p::Real=2., method::Symbol=:optim)
-    @assert length(lags) == length(yp) > 1
+function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}; p::Real=2., method::Symbol=:optim)
+    @assert length(lags) == size(X,1) > 1
     @assert all(lags .>= 1)
+    # @assert p > 0. && kt > 0
+
+    idx = findall(vec(.!any(isnan.(X), dims=1)))
+    # println(length(idx))
+    # println(idx)
+    X = view(X,:,idx)  # remove columns containing NaN
 
     xp = p * log.(lags)
+    μX = mean(X, dims=2)
+    yp = vec(log.(mean((abs.(X.-μX)).^p, dims=2)))
 
     hurst, η = NaN, NaN
-    
+
+    # old version with weights
+    # # polynomial order of the weight for samples, if 0 the uniform weight is used
+    # kt::Integer = 0
+    # wt = StatsBase.weights(causal_weight(size(X,2), kt))
+    # μX = mean(X, wt, 2)
+    # yp = vec(log.(mean((abs.(X.-μX)).^p, wt, 2)))
+    # # yp = vec(log.(mean((abs.(X)).^p, wt, 2)))  # <- this gives lower SNR
+    # xp = p * log.(lags)
+    # # weight for scales
+    # ks::Integer = 0  # hard-coded: polynomial order of weight for scales, if 0 the uniform weight is used
+    # ws = StatsBase.weights(poly_weight(length(yp), ks))
+    # yc = yp .- mean(yp, ws)
+    # xc = xp .- mean(xp, ws)
+    # func = h -> 1/2 * sum(ws .* (yc - h*xc).^2)
+    # # func = h -> 1/2 * sum(ws .* abs.(yc - h*xc))
+
     # estimation of H and η
     if method==:optim
         yc = yp .- mean(yp)
@@ -40,86 +84,17 @@ function powlaw_estim_from_expectation(yp::AbstractVector{<:Real}, lags::Abstrac
     else
         error("Unknown method $(method).")
     end
-    
-    cp = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)  # constant depending on p
-    σ = exp((η-log(cp))/p)
-    
-    return hurst, σ
-end
-
-
-"""
-Power-law estimator for Hurst exponent and volatility.
-
-Y = (y_k)_k, with y_k := 𝐄[|Δ_{kδ} B^{H}(t)|^p]
-X = (x_k)_k, with x_k := p * log(k)
-
-# Args
-- X: Matrix of fGn, each row is a component (i.e., a fGn of some time lag).
-- lags: time lags (increment step) used to compute each component of `X`
-- p: power of the moment
-- kt: polynomial order of the weight for samples, if 0 the uniform weight is used
-
-# Returns
-- hurst, σ, obj: estimation of Hurst and volatility, as well as an object of optimizer.
-
-# Notes
-- `X` is computed from fBm by taking finite differences. The second dimension corresponds to time. Example, let `W` be a fBm sample path then the following command computes `X`:
-```julia
-julia> lags = 2:10
-julia> X = transpose(lagdiff(W, lags, :causal))
-```
-- `p=1` is robust against quantization error.
-- A non-zero `kt` puts more weight on most recent samples (i.e. those at large column numbers).
-"""
-function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}; p::Real=2., kt::Integer=0)
-    @assert length(lags) == size(X,1) > 1
-    @assert all(lags .>= 1)
-    # @assert p > 0. && kt > 0
 
     cp = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)  # constant depending on p
-
-    # observation and explanatory vectors
-    wt = StatsBase.weights(causal_weight(size(X,2), kt))
-    μX = mean(X, wt, 2)
-    yp = vec(log.(mean((abs.(X.-μX)).^p, wt, 2)))
-    # yp = vec(log.(mean((abs.(X)).^p, wt, 2)))  # <- this gives lower SNR
-    xp = p * log.(lags)
-
-    # Estimation method 1: optimization
-    # weight for scales
-    ks::Integer = 0  # hard-coded: polynomial order of weight for scales, if 0 the uniform weight is used
-    ws = StatsBase.weights(poly_weight(length(yp), ks))
-    yc = yp .- mean(yp, ws)
-    xc = xp .- mean(xp, ws)
-    func = h -> 1/2 * sum(ws .* (yc - h*xc).^2)
-    # func = h -> 1/2 * sum(ws .* abs.(yc - h*xc))
-
-    # estimation of H and η
-    # Gradient-free constrained optimization
-    ɛ::Real = 1e-2  # search hurst in the interval [ɛ, 1-ɛ]
-    opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
-    # # Gradient-based optimization
-    # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
-    # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
-    hurst = Optim.minimizer(opm)[1]
-    η = mean(yp - hurst*xp, ws)
-
-    # # Estimation method 2: linear regression
-    # # by manual inversion
-    # Ap = hcat(xp, ones(length(xp))) # design matrix
-    # hurst, β = Ap \ yp
-    # # or by GLM
-    # dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
-    # opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
-    # η, hurst = GLM.coef(opm)
-
     σ = exp((η-log(cp))/p)
 
-    return hurst, σ, opm
+    return hurst, σ, (xp, yp)
 end
 
-const fBm_powlaw_estim = powlaw_estim
+function powlaw_estim(X::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}; kwargs...)
+    dX = transpose(lagdiff(X, lags, :causal))  # take transpose s.t. each column is an observation
+    return powlaw_estim(dX, lags; kwargs...)
+end
 
 
 """
@@ -189,6 +164,7 @@ end
 
 
 ####### Generalized scalogram #######
+
 """
 B-Spline scalogram estimator for Hurst exponent and volatility.
 
@@ -301,38 +277,45 @@ Safe evaluation of the inverse quadratic form
 where the matrix `A` is symmetric and positive definite.
 """
 function xiAx(A::AbstractMatrix{<:Real}, X::AbstractVecOrMat{<:Real}, ε::Real=0)
+    # Sanity check
     @assert issymmetric(A)
     @assert size(X, 1) == size(A, 1)
 
     # a simple version would be:
     # return tr(X' * pinv(A) * X)
 
+    # SVD is equivalent to eigen decomposition on covariance matrix
     # U, S, V = svd(A)
     S, U = eigen(A)  # so that U * Diagonal(S) * inv(U) == A, in particular, U' == inv(U)
-    idx = (S .> ε)
-    return sum((U[:,idx]'*X).^2 ./ S[idx])
+    idx = (S .> ε)  # shrinkage of small eigen values for stability
+
+    if length(idx) > 0
+        return sum((U[:,idx]'*X).^2 ./ S[idx])
+    else
+        throw(error("Invalide covariance matrix."))
+    end
 end
 
 
 """
-Safe evaluation of the log-likelihood of a fBm model with the implicit optimal volatility (in the MLE sense).
+Safe evaluation of the log-likelihood of a fBm model with the implicit optimal σ (in the MLE sense).
 
 The value of log-likelihood (up to some additive constant) is
     -1/2 * (N*log(X'*inv(A)*X) + logdet(A))
 
 # Args
 - A: covariance matrix
-- X: vector or matrix of observation. For matrix the columns should be i.i.d. observations.
+- X: sample matrix, each column is one sample.
 
 # Notes
 - This function is common to all MLEs with the covariance matrix of form `σ²A(h)`, where `{σ, h}` are unknown parameters. This kind of MLE can be carried out in `h` uniquely and `σ` is obtained from `h`.
 """
-function log_likelihood_H(A::AbstractMatrix{<:Real}, X::AbstractVecOrMat{<:Real}, ε::Real=0)
+function log_likelihood_H(A::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real}, ε::Real=0)
+    # Sanity check
     @assert issymmetric(A)
     @assert size(X, 1) == size(A, 1)
 
-    N = ndims(X)>1 ? size(X,2) : 1  # number of i.i.d. samples in data
-    # d = size(X,1)  # such that N*d == length(X)
+    N = size(X,2) # number of i.i.d. samples in data
 
     # U, S, V = svd(A)
     S, U = eigen(A)  # so that U * Diagonal(S) * inv(U) == A, in particular, U' == inv(U)
@@ -343,34 +326,36 @@ function log_likelihood_H(A::AbstractMatrix{<:Real}, X::AbstractVecOrMat{<:Real}
     return val - length(X)*log(2π*exp(1)/length(X))/2  # with the constant part
 end
 
+log_likelihood_H(A::AbstractMatrix, X::AbstractVector, args...) = log_likelihood_H(A, reshape(X,:,1), args...)
+
 
 """
 Log-likelihood of a general Gaussian vector.
 
 # Args
 - A: covariance matrix
-- X: sample vector or matrix, each column is one observation.
+- X: sample matrix, each column is one sample.
 """
-function log_likelihood(A::AbstractMatrix{<:Real}, X::AbstractVecOrMat{<:Real})
+function log_likelihood(A::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real})
     @assert issymmetric(A)
     @assert size(X, 1) == size(A, 1)
 
-    N = ndims(X)>1 ? size(X,2) : 1  # number of observations
-    # d = size(X,1), # dimension of the vector, such that N*d == length(X)
-
+    N = size(X,2) # number of i.i.d. samples in data
     return -1/2 * (N*logdet(A) + xiAx(A,X) + length(X)*log(2π))
 end
 
+log_likelihood(A::AbstractMatrix, X::AbstractVector) = log_likelihood(A, reshape(X,:,1))
+
 
 #### fWn-MLE ####
-# A fWn is the filtration of a fBm time series by a bank of high pass filters, eg, multiscale wavelet filters.
+# A fWn is the filtration of a fBm time series by a bank of high pass filters, e.g., multiscale wavelet filters.
 
 """
-H-dependent log-likelihood of fractional wavelet noise (fWn) with optimal σ.
+Safe evaluation of the log-likelihood of a fWm model with the implicit optimal σ (in the MLE sense).
 """
-function fWn_log_likelihood_H(X::AbstractVecOrMat{T}, F::AbstractVector{<:AbstractVector{T}}, H::Real) where {T<:Real}
+function fWn_log_likelihood_H(X::AbstractVecOrMat{<:Real}, F::AbstractVector{<:AbstractVector{<:Real}}, H::Real)
     @assert 0 < H < 1
-    @assert size(X,1) % length(F) == 0
+    @assert size(X,1) % length(F) == 0  #
 
     Σ = Matrix(Symmetric(fWn_covmat(F, size(X,1)÷length(F)-1, H)))
     return log_likelihood_H(Σ, X)
@@ -510,10 +495,10 @@ function fGn_MLE_estim(X::AbstractVecOrMat{<:Real}, d::Integer, G::AbstractVecto
     end
 
     func = h -> -fGn_log_likelihood_H(X, h, d, G)
-    
+
     opm = nothing
     hurst = nothing
-    
+
     if method == :optim
         # Gradient-free constrained optimization
         opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
@@ -527,12 +512,12 @@ function fGn_MLE_estim(X::AbstractVecOrMat{<:Real}, d::Integer, G::AbstractVecto
     else
         throw("Unknown method: ", method)
     end
-    
+
     # Σ = Matrix(Symmetric(covmat(FractionalGaussianNoise(hurst, 1.), size(X,1))))
     Σ = Matrix(Symmetric(fGn_covmat(size(X,1), hurst, d)))
     σ = sqrt(xiAx(Σ, X) / length(X))
     L = log_likelihood_H(Σ, X)
-    
+
     return hurst, σ, L, opm
 end
 
