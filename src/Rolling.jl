@@ -25,7 +25,7 @@ end
 
 function rolling_apply_hard(func::Function, X::AbstractVecOrMat, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal)
     # @assert w>0
-    L = length(X)
+    L = size(X)[end]  # number of samples in X
     res = []
     if mode==:causal
         for t=L:-p:d*w
@@ -44,7 +44,7 @@ end
 
 function rolling_apply_soft(func::Function, X::AbstractVecOrMat, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal)
     # @assert w>0
-    L = length(X)
+    L = size(X)[end]  # number of samples in X
     res = []
     if mode==:causal
         for t=L:-p:1

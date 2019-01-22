@@ -563,13 +563,13 @@ end
 
 function rolling_regress_predict(regressor::Function, predictor::Function, X0::AbstractVecOrMat{T}, Y0::AbstractVecOrMat{T}, λ::Int, (w,s,d)::Tuple{Int,Int,Int}, p::Int, trans::Function=(x->vec(x)); mode::Symbol=:causal) where {T<:Number}
     X = ndims(X0)>1 ? X0 : reshape(X0, 1, :)  # vec to matrix, create a reference not a copy
-    Y = ndims(Y0)>1 ? Y0 : reshape(Y0, 1, :)        
-    @assert size(X,2) == size(Y,2)    
+    Y = ndims(Y0)>1 ? Y0 : reshape(Y0, 1, :)
+    @assert size(X,2) == size(Y,2)
 
     (any(isnan.(X)) || any(isnan.(Y))) && throw(ValueError("Inputs cannot contain nan values!"))
     L = size(X,2)  # total time
     @assert L >= w >= s
-    
+
     res_time, res_reg, res_prd = [], [], []  # temporary lists
 
     if mode == :causal  # causal
@@ -584,7 +584,7 @@ function rolling_regress_predict(regressor::Function, predictor::Function, X0::A
             xv = rolling_apply_hard(trans, view(X, :, t-w+1:t), s, d; mode=:causal)
             yv0 = view(Y, :, t-w+1:t)[:, end:-d:1]  # time-reversed
             yv = yv0[:,1:size(xv,2)][:,end:-1:1]  # reverse back
-            
+
             (xs, ys) = if nan == :ignore
                 # ignore columns containing nan values
                 idx = findall(.!vec(any(isnan.(vcat(xv, yv)), dims=1)))  # without vec findall will return `CartesianIndex`
@@ -597,7 +597,7 @@ function rolling_regress_predict(regressor::Function, predictor::Function, X0::A
                 # set all nan to zero
                 xv[findall(isnan.(xv))] = 0
                 yv[findall(isnan.(yv))] = 0
-                (xv, yv)                
+                (xv, yv)
             else
                 (xv, yv)
             end
@@ -636,22 +636,22 @@ function rolling_regress_predict(regressor::Function, predictor::Function, X0::A
                 # set all nan to zero
                 xv[findall(isnan.(xv))] = 0
                 yv[findall(isnan.(yv))] = 0
-                (xv, yv)                
+                (xv, yv)
             else
                 (xv, yv)
             end
-            
+
             if length(xs) > 0 && length(ys) > 0
                 # push!(res, (t,regressor(ys, xs)))
-                reg = regressor(ys', xs')                
+                reg = regressor(ys', xs')
                 prd = isempty(res_reg) ? [] : predictor(res_reg[end], xv, yv[:,end])
                 pushfirst!(res_time, t)
                 pushfirst!(res_reg, reg)
-                pushfirst!(res_prd, prd)                
+                pushfirst!(res_prd, prd)
             end
         end
     end
-    res = [(time=t, regression=reg, prediction=prd) for (t, reg, prd) in zip(res_time, res_reg, res_prd)]  # final result is a named tuple    
+    res = [(time=t, regression=reg, prediction=prd) for (t, reg, prd) in zip(res_time, res_reg, res_prd)]  # final result is a named tuple
     return res
 end
 
@@ -744,4 +744,120 @@ function powlaw_estim_predict(X::AbstractVector{<:Real}, dlag::Integer, Δ::Inte
     # println(length(X))
     μc, Σc = cond_mean_cov(FractionalGaussianNoise(H, dlag), length(dX)+1:length(dX)+plag, pidx, dX)
     return H, σ, μc, σ^2 * Σc
+end
+
+
+
+"""TODO
+Multiscale fGn-MLE
+"""
+function ms_fGn_MLE_estim(X::AbstractVector{T}, lags::AbstractVector{Int}, w::Int) where {T<:Real}
+    Hs = zeros(length(lags))
+    Σs = zeros(length(lags))
+
+    for (n,lag) in enumerate(lags)  # time lag for finite difference
+        # vectorization with window size w
+        dXo = rolling_vectorize(X[lag+1:end]-X[1:end-lag], w, 1, 1)
+        # rolling mean with window size 2lag, then down-sample at step lag
+        dX = rolling_mean(dXo, 2lag, lag; boundary=:hard)
+
+        (hurst_estim, σ_estim), obj = fGn_MLE_estim(squeezedims(dX), lag)
+
+        Hs[n] = hurst_estim
+        Σs[n] = σ_estim
+    end
+
+    return Hs, Σs
+end
+
+
+
+##### B-Spline DCWT MLE (Not maintained) #####
+# Implementation based on DCWT formulation, not working well in practice.
+
+function fBm_bspline_covmat_lag(H::Real, v::Int, l::Int, sclrng::AbstractVector{Int}, mode::Symbol)
+    return Amat_bspline(H, v, l, sclrng) .* [sqrt(i*j) for i in sclrng, j in sclrng].^(2H+1)
+end
+
+
+"""
+Compute the covariance matrix of B-Spline DCWT coefficients of a pure fBm.
+
+The full covariance matrix of `J`-scale transform and of time-lag `N` is a N*J-by-N*J symmetric matrix.
+
+# Args
+- l: maximum time-lag
+- sclrng: scale range
+- v: vanishing moments of B-Spline wavelet
+- H: Hurst exponent
+- mode: mode of convolution
+"""
+function fBm_bspline_covmat(l::Int, sclrng::AbstractVector{Int}, v::Int, H::Real, mode::Symbol)
+    J = length(sclrng)
+    Σ = zeros(((l+1)*J, (l+1)*J))
+    Σs = [fBm_bspline_covmat_lag(H, v, d, sclrng, mode) for d = 0:l]
+
+    for r = 0:l
+        for c = 0:l
+            Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (c>=r) ? Σs[c-r+1] : transpose(Σs[r-c+1])
+        end
+    end
+
+    return Matrix(Symmetric(Σ))  #  forcing symmetry
+    # return [(c>=r) ? Σs[c-r+1] : Σs[r-c+1]' for r=0:N-1, c=0:N-1]
+end
+
+
+"""
+Evaluate the log-likelihood of B-Spline DCWT coefficients.
+"""
+function fBm_bspline_log_likelihood_H(X::AbstractVecOrMat{T}, sclrng::AbstractVector{Int}, v::Int, H::Real, mode::Symbol) where {T<:Real}
+    @assert 0 < H < 1
+    @assert size(X,1) % length(sclrng) == 0
+
+    L = size(X,1) ÷ length(sclrng)  # integer division: \div
+    # N = ndims(X)>1 ? size(X,2) : 1
+
+    Σ = fBm_bspline_covmat(L-1, sclrng, v, H, mode)  # full covariance matrix
+
+    # # strangely, the following does not work (logarithm of a negative value)
+    # iΣ = pinv(Σ)  # regularization by pseudo-inverse
+    # return -1/2 * (J*N*log(trace(X'*iΣ*X)) + logdet(Σ))
+
+    return log_likelihood_H(Σ, X)
+end
+
+
+"""
+B-Spline wavelet-MLE estimator.
+"""
+function fBm_bspline_DCWT_MLE_estim(X::AbstractVecOrMat{T}, sclrng::AbstractVector{Int}, v::Int, mode::Symbol; method::Symbol=:optim, ε::Real=1e-2) where {T<:Real}
+    @assert size(X,1) % length(sclrng) == 0
+    # number of wavelet coefficient vectors concatenated into one column of X
+    L = size(X,1) ÷ length(sclrng)  # integer division: \div
+    # N = ndims(X)>1 ? size(X,2) : 1
+
+    func = x -> -fBm_bspline_log_likelihood_H(X, sclrng, v, x, mode)
+
+    opm = nothing
+    hurst = nothing
+
+    if method == :optim
+        # Gradient-free constrained optimization
+        opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+        # # Gradient-based optimization
+        # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+        # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+        hurst = Optim.minimizer(opm)[1]
+    elseif method == :table
+        Hs = collect(ε:ε:1-ε)
+        hurst = Hs[argmin([func(h) for h in Hs])]
+    else
+        throw("Unknown method: ", method)
+    end
+
+    Σ = fBm_bspline_covmat(L-1, sclrng, v, hurst, mode)
+    σ = sqrt(xiAx(Σ, X) / length(X))
+
+    return (hurst, σ), opm
 end

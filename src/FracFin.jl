@@ -30,8 +30,6 @@ import Dates:AbstractTime, AbstractDateTime, TimePeriod
 import TimeSeries
 import TimeSeries: AbstractTimeSeries, TimeArray
 
-import RCall
-
 import PyCall
 # @PyCall.pyimport pywt
 # @PyCall.pyimport pywt.swt as pywt_swt

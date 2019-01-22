@@ -67,7 +67,7 @@ function fullpastfilt(X::AbstractVector{<:Number}, filters::AbstractVector, n::I
     Xϕ = Φ(X)
 
     # Experimental: phase-lag correction
-    X1 = copy(X)    
+    X1 = copy(X)
     for t=2:n
         if method==:recursive
             X1 += X - Xϕ
@@ -469,7 +469,6 @@ end
 
 
 # function dyadic_wavelet_filters()
-
 # end
 
 """
@@ -740,6 +739,17 @@ function diff_Cψρ_bspline(τ::Real, ρ::Real, H::Real, v::Integer, mode::Symbo
     return QuadGK.quadgk(f, rng...)[1]
 end
 
+
+"""
+Evaluate A_ρ(τ, H)
+
+# Args
+- τ, ρ, H: see definition
+- v: vanishing moments of the wavelet ψ
+- mode: {:left, :center, :right} for causal, centered, anti-causal ψ
+"""
+Aρ_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol) = gamma(2H+1) * sin(π*H) * Cψρ_bspline(τ, ρ, H, v, mode)
+
 """
 Evaluate the matrix of `A_ρ(H, τ)` for varing ρ with the B-Spline wavelet.
 
@@ -749,5 +759,6 @@ Evaluate the matrix of `A_ρ(H, τ)` for varing ρ with the B-Spline wavelet.
 """
 function Amat_bspline(H::Real, v::Integer, lag::Real, sclrng::AbstractVector{<:Integer}, mode::Symbol)
     # all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
-    return gamma(2H+1) * sin(π*H) * [Cψρ_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
+    return [Aρ_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
+    # return gamma(2H+1) * sin(π*H) * [Cψρ_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
 end
