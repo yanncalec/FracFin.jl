@@ -232,17 +232,17 @@ covmat(X::StochasticProcess, G::AbstractVector) = autocov!(zeros(length(G), leng
 
 
 """
-Return the auto-covarince matrix of a stochastic process on two sampling grids.
+Return the auto-covarince matrix of a stochastic process between two sampling grids.
 
 The `(i,j)`-th coefficient in the matrix is `autocov(G1[i], G2[j])`.
 """
 covmat(X::StochasticProcess, G1::AbstractVector, G2::AbstractVector) = autocov!(zeros(length(G1), length(G2)), X, G1, G2)
 
 """
-Return the auto-covarince matrix of a stationary process on an integer sampling grid.
+Return the auto-covarince matrix on an integer sampling grid.
 """
-covmat(X::StationaryProcess, N::Integer) = covmat(X, 1:N)
-covmat(X::StationaryProcess, N::Integer, M::Integer) = covmat(X, 1:N, 1:M)
+covmat(X::StochasticProcess, N::Integer) = covmat(X, 1:N)
+covmat(X::StochasticProcess, N::Integer, M::Integer) = covmat(X, 1:N, 1:M)
 
 
 """
@@ -281,25 +281,6 @@ function partcorr(X::DiscreteTimeStationaryProcess, G::AbstractVector{<:Discrete
         return partcorr!(zeros(length(G)), X, G)
     end
 end
-
-
-# function autocov(X::FilteredProcess{T, P}, t::T, s::T) where {T<:TimeStyle, P<:StochasticProcess}
-#     proc = parent_process(X)
-#     δ = step(X)
-
-#     return autocov(proc, (t+δ), (s+δ)) - autocov(proc, (t+δ), (s)) - autocov(proc, (t), (s+δ)) + autocov(proc, (t), (s))
-# end
-
-
-# """
-# Return the auto-covariance function of a process of increments. The computation is done via the auto-covariance of the parent process.
-# """
-# function autocov(X::IncrementProcess{P}, t::Integer, s::Integer) where P<:StochasticProcess
-#     proc = parent_process(X)
-#     δ = step(X)
-
-#     return autocov(proc, (t+δ), (s+δ)) - autocov(proc, (t+δ), (s)) - autocov(proc, (t), (s+δ)) + autocov(proc, (t), (s))
-# end
 
 
 #### Statistical inference on stochastic process ####
