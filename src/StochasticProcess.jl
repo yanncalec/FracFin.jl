@@ -194,6 +194,7 @@ end
 Return the auto-covariance sequence of a stationary process on a regular grid.
 """
 covseq(X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle = autocov!(zeros(length(G)), X, G)
+covseq(X::StationaryProcess, N::Integer) = covseq(X, 1:N)
 
 
 function autocov!(C::Matrix{<:Real}, X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle

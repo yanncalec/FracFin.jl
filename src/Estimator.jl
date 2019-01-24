@@ -184,7 +184,7 @@ fGn_filter = d -> vcat(1, zeros(d-1), -1)
 Maximum likelihood estimation of Hurst exponent and volatility for fractional Gaussian noise.
 
 # Args
-- X: sample vector or matrix.
+- X: sample vector or matrix of fGn.
 - d: time lag of the finite difference operator used for computing `X`.
 - G: integer time grid of `X`, by default the regular grid `1:size(X,1)` is used.
 - kwargs: see `fWn_MLE_estim()`.
@@ -321,7 +321,7 @@ end
 ###### Power law estimator ######
 
 @doc raw"""
-    powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}; p::Real=2., method::Symbol=:optim)
+    powlaw_estim(X, lags; p=2., method=:optim)
 
 Power-law estimator for Hurst exponent and volatility.
 
@@ -407,11 +407,12 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
     return hurst, σ, (xp, yp)
 end
 
+
 """
     powlaw_estim(X::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}; kwargs...)
 
 # Args
-- X: sample path of fBm
+- X: sample path of fBm, typically the log-price
 - lags:
 """
 function powlaw_estim(X::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}; kwargs...)
@@ -426,7 +427,7 @@ end
 B-Spline scalogram estimator for Hurst exponent and volatility.
 
 # Args
-- S: vector of scalogram, ie, variance of the wavelet coefficients per scale.
+- S: vector of scalogram, i.e., variance of the wavelet coefficients per scale.
 - sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one row in the matrix X
 - v: vanishing moments
 - p: power by which the scalogram is computed
