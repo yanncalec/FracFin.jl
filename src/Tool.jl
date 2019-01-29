@@ -223,9 +223,9 @@ Compute d-lag finite difference of a vector or matrix (in row direction).
 function lagdiff(X::AbstractVecOrMat{<:Number}, d::Integer, mode::Symbol=:causal)
     dX = fill(NaN, size(X))
     if ndims(X) == 1
-        dX[d+1:end] = X[d+1:end]-X[1:end-d]
+        dX[d+1:end] = X[d+1:end] .- X[1:end-d]  # '-' or '.-' may raise "step cannot be zero" error on iterators like `X=1:100`, use `collect(X)`
     else
-        dX[d+1:end,:] = X[d+1:end,:]-X[1:end-d,:]
+        dX[d+1:end,:] = X[d+1:end,:] .- X[1:end-d,:]
     end
     return (mode==:causal) ? dX : circshift(dX, -d)
 end

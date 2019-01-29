@@ -335,10 +335,10 @@ end
 Power-law estimator for Hurst exponent and volatility.
 
 # Args
-- X: Matrix of fGn, each row is a fGn of some time lag and each column is an observation.
+- X: matrix of fGn, each row is a fGn of some time lag and each column is an observation.
 - lags: time lags (increment step) used to compute each component of `X`
 - p: power of the moment
-- methods: method of estimation: {:optim, :lm, :glm}
+- methods: method of estimation: {:optim, :lm}
 
 # Returns
 - hurst, σ: estimation of Hurst and volatility, as well as an object of optimizer
@@ -359,10 +359,9 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
     @assert all(lags .>= 1)
     # @assert p > 0. && kt > 0
 
+    # remove columns containing NaN
     idx = findall(vec(.!any(isnan.(X), dims=1)))
-    # println(length(idx))
-    # println(idx)
-    X = view(X,:,idx)  # remove columns containing NaN
+    X = X[:,idx] # view(X,:,idx)
 
     xp = p * log.(lags)
     μX = mean(X, dims=2)
@@ -399,14 +398,13 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
         # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
         hurst = Optim.minimizer(opm)[1]
         η = mean(yp - hurst*xp)
-    elseif method==:lm  # linear model by hand
-        # by manual inversion
-        Ap = hcat(xp, ones(length(xp))) # design matrix
-        hurst, η = Ap \ yp
-    elseif method==:glm  # using GLM package, same as lm
+    elseif method==:lm  # using GLM package
         dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
         opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
         η, hurst = GLM.coef(opm)
+        # # or equivalently, by manual inversion
+        # Ap = hcat(xp, ones(length(xp))) # design matrix
+        # hurst, η = Ap \ yp
     else
         error("Unknown method $(method).")
     end
@@ -423,8 +421,8 @@ end
     powlaw_estim(X::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}; kwargs...)
 
 # Args
-- X: sample path of fBm, typically the log-price
-- lags:
+- X: sample path of fBm, e.g. the log-price
+- lags: time lags used to compute finite differences
 """
 function powlaw_estim(X::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}; kwargs...)
     dX = transpose(lagdiff(X, lags, :causal))  # take transpose s.t. each column is an observation
@@ -467,6 +465,55 @@ function bspline_scalogram_estim(S::AbstractVector{<:Real}, sclrng::AbstractVect
     end
 
     return hurst, σ, ols
+
+    # Ar = hcat(xr, ones(length(xr)))  # design matrix
+    # H0, η = Ar \ yr  # estimation of H and β
+    # hurst = H0-1/2
+    # A = Aρ_bspline(0, r, hurst, v, mode)
+    # σ = exp((η - log(abs(A)))/2)
+    # return hurst, σ
+end
+
+function bspline_scalogram_estim(S::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, v::Integer; p::Real=2., mode::Symbol=:center)
+    @assert length(S) == length(sclrng)
+    @assert any(sclrng .% 2 .== 0)  # all scales must be even
+
+    xp = log.(sclrng.^p)
+    yp = log.(S)
+
+    # res = IRLS(log.(S), p*log.(sclrng), p)
+    # hurst::Float64 = res[1][1]-1/2
+    # β::Float64 = res[1][2][1]  # returned value is a scalar in a vector form
+    # ols::Float64 = NaN
+    # estimation of H and η
+    if method==:optim
+        yc = yp .- mean(yp)
+        xc = xp .- mean(xp)
+        func = h -> 1/2 * sum((yc - h*xc).^2)
+        # Gradient-free constrained optimization
+        ɛ = 1e-2  # search hurst in the interval [ɛ, 1-ɛ]
+        opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+        hurst = (Optim.minimizer(opm)[1] - 1)/2
+        η = mean(yp - (2hurst+1)*xp)
+    elseif method==:lm  # using GLM package
+        dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
+        opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
+        coef = GLM.coef(opm)
+        η = coef[1]
+        hurst = coef[2]-1/2
+    else
+        error("Unknown method $(method).")
+    end
+        
+    cp = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
+    σ = try
+        Aρ = Aρ_bspline(0, 1, hurst, v, mode)
+        exp((η - log(cp) - log(abs(Aρ))*p/2)/p)
+    catch
+        NaN
+    end
+
+    return (hurst=hurst, σ=σ, vars=(xp,yp), optimizer=opm)
 
     # Ar = hcat(xr, ones(length(xr)))  # design matrix
     # H0, η = Ar \ yr  # estimation of H and β
