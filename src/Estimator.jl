@@ -485,6 +485,7 @@ function bspline_scalogram_estim(S::AbstractVector{<:Real}, sclrng::AbstractVect
     # hurst::Float64 = res[1][1]-1/2
     # β::Float64 = res[1][2][1]  # returned value is a scalar in a vector form
     # ols::Float64 = NaN
+
     # estimation of H and η
     if method==:optim
         yc = yp .- mean(yp)
@@ -504,7 +505,7 @@ function bspline_scalogram_estim(S::AbstractVector{<:Real}, sclrng::AbstractVect
     else
         error("Unknown method $(method).")
     end
-        
+
     cp = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
     σ = try
         Aρ = Aρ_bspline(0, 1, hurst, v, mode)
