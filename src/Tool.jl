@@ -349,7 +349,9 @@ function equalize_daynight(sdata::AbstractVector)
         d1 = TimeSeries.values(sdata[n])
         t1 = TimeSeries.timestamp(sdata[n])
         # push!(edata, TimeSeries.TimeArray(t1, d1.-(d1[1]-d0[end]), TimeSeries.colnames(sdata[1])))  # <- TODO: d0[end] or d1[1] is NaN? d1 is 2d array?
-        push!(edata, TimeSeries.TimeArray(t1, d1.-func(d1,d0), TimeSeries.colnames(sdata[1])))  # <- TODO: d0[end] or d1[1] is NaN? d1 is 2d array?
+        dv = func(d1,d0)
+        dv[isnan.(dv)] .= 0  # <- this makes the operation nan-safe
+        push!(edata, TimeSeries.TimeArray(t1, d1.-dv, TimeSeries.colnames(sdata[1])))  # <- TODO: d0[end] or d1[1] is NaN? d1 is 2d array?
     end
     return edata
 end

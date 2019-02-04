@@ -1,24 +1,39 @@
 """
-Maximum likelihood estimation and prediction of fGn.
+MLE of fGn model and prediction by replication.
 
 # Args
 - s: sub window size
 - l: length of decorrelation
 - k: number of samples used for prediction
+"""
+function fGn_MLE_estim_predict_replict(X::AbstractVector{<:Real}, d::Integer, s::Integer, l::Integer, k::Integer=1; kwargs...)
+    est = fGn_MLE_estim(X, d, s, l; kwargs...)
+    μ = sign(est.hurst-0.5) * mean(X[end-k+1:end])
+
+    return (hurst=est.hurst, σ=est.σ, μ=μ)
+end
+
+
+"""
+MLE of fGn model and prediction by conditional statistics.
+
+# Args
+- s: sub window size
+- l: length of decorrelation
+- k: number of samples used for prediction
+- u: downsampling factor for samples
 - n: step of prediction
 """
-function fGn_MLE_estim_predict(X::AbstractVector{<:Real}, d::Integer, s::Integer, l::Integer, k::Integer, u::Integer, n::Integer; kwargs...)
-    @assert 0 < k && 0 < n+k <= length(X)
+function fGn_MLE_estim_predict_cond(X::AbstractVector{<:Real}, d::Integer, s::Integer, l::Integer, k::Integer, u::Integer=1, n::Integer=d; bias::Bool=true, kwargs...)
+    @assert 0 < k && 0 < n
+    # @assert n+k*u <= length(X)
 
-    μX = mean(X)
-    est = fGn_MLE_estim(X.-μX, d, s, l; kwargs...)
+    # estimation of hurst and volatility
+    est = fGn_MLE_estim(X, d, s, l; kwargs...)
 
-    P = FractionalGaussianNoise(est.hurst, d)
-    # gy = collect(1:n) .+ k  # grid of prediction
-    # gx = 1:k  # grid of samples
-
-    gy = t -> t .+ collect(1:n)
-    gx = t -> collect(t-k*u+1:u:t)
+    P = FractionalGaussianNoise(est.hurst, d)  # fGn with estimated hurst at step d
+    gy = t -> t .+ collect(1:n)  # grid of prediction, starting from t
+    gx = t -> collect((t-k*u+1):u:t)  # grid of samples, ending by t
 
     # covariance matrices
     Σyy = covmat(P, gy(0))
@@ -26,26 +41,20 @@ function fGn_MLE_estim_predict(X::AbstractVector{<:Real}, d::Integer, s::Integer
     Σxx = covmat(P, gx(0))
     iΣxx = pinv(Matrix(Σxx))
 
-    α = Σyx * iΣxx  # kernels of conditional mean
-    # bias  β = μy - α * μx
-    βm = hcat([X[gy(t)] - α*X[gx(t)] for t=1:length(X) if gx(t)[1]>0 && gy(t)[end]<=length(X)]...)
-    β = median(βm, dims=2)
+    α::AbstractMatrix = Σyx * iΣxx  # kernels of conditional mean
+    # estimation of bias  β = μy - α * μx
+    β::AbstractVector = if bias 
+        # βm = hcat([X[gy(t)] - α*X[gx(t)] for t=1:length(X) if gx(t)[1]>0 && gy(t)[end]<=length(X)]...)  # t=(k*u):(length(X)-n)
+        βm = hcat([X[gy(t)] - α*X[gx(t)] for t=k*u:length(X)-n]...)  # t=(k*u):(length(X)-n)
+        mean(βm, dims=2)[:]
+    else
+        zeros(n)
+    end
 
-    # conditional mean
-    # μm = hcat([α * X[gx(t)] for t=1:length(X) if gx(t)[1]>0]...)
-    # μ = median(μm, dims=2) + β
-    μ = α * X[gx(length(X))] + β
+    # conditional mean and covariance
+    μ::AbstractVector = α * X[gx(length(X))] + β
+    Σ::AbstractMatrix = Σyy - Σyx * iΣxx * Σyx'
 
-    Σ = Σyy - Σyx * iΣxx * Σyx'  # conditional covariance
-
-    # prd = cond_mean_cov(FractionalGaussianNoise(est.hurst, d), n, X-μX)
-    # # μ = if :normalize in keys(kwargs)
-    # #     prd.μ / prd.C
-    # # else
-    # #     prd.μ
-    # # end
-    # C = prd.C[end,:]
-    # return (hurst=est.hurst, σ=est.σ, μ=prd.μ/LinearAlgebra.norm(C,1), C=C, Σ=prd.Σ)
     return (hurst=est.hurst, σ=est.σ, μ=μ, Σ=Σ)
 end
 
