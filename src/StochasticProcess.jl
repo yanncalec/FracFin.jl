@@ -239,7 +239,7 @@ The `(i,j)`-th coefficient in the matrix is `autocov(G1[i], G2[j])`.
 covmat(X::StochasticProcess, G1::AbstractVector, G2::AbstractVector) = autocov!(zeros(length(G1), length(G2)), X, G1, G2)
 
 """
-Return the auto-covarince matrix on an integer sampling grid.
+Return the auto-covarince matrix on an integer sampling grid `1:N`.
 """
 covmat(X::StochasticProcess, N::Integer) = covmat(X, 1:N)
 covmat(X::StochasticProcess, N::Integer, M::Integer) = covmat(X, 1:N, 1:M)
@@ -303,13 +303,20 @@ function cond_mean_cov(P::StochasticProcess{T}, Gx::AbstractVector{<:T}, Gy::Abs
     # iΣyy = iL' * iL
 
     μc = Σxy * iΣyy * Y
+
+    # μc = Σxy * iΣyy * Y
     # μc = Σxy * (Σyy\Y)
     Σc = Σxx - Σxy * iΣyy * Σxy'
 
-    return μc, Σc, Σxy * iΣyy
+    return (μ=μc, Σ=Σc, C=Σxy * iΣyy)
 end
 
 cond_mean_cov(P::StochasticProcess, gx::ContinuousTime, Gy::AbstractVector, Y::AbstractVector) = cond_mean_cov(P, [gx], Gy, Y)
+
+"""
+Conditional mean and covariance on regular grid.
+"""
+cond_mean_cov(P::StochasticProcess, n::DiscreteTime, Y::AbstractVector) = cond_mean_cov(P, (1:n).+length(Y), 1:length(Y), Y)
 
 
 """

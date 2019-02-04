@@ -1,3 +1,87 @@
+"""
+Maximum likelihood estimation and prediction of fGn.
+
+# Args
+- s: sub window size
+- l: length of decorrelation
+- k: number of samples used for prediction
+- n: step of prediction
+"""
+function fGn_MLE_estim_predict(X::AbstractVector{<:Real}, d::Integer, s::Integer, l::Integer, k::Integer, u::Integer, n::Integer; kwargs...)
+    @assert 0 < k && 0 < n+k <= length(X)
+
+    μX = mean(X)
+    est = fGn_MLE_estim(X.-μX, d, s, l; kwargs...)
+
+    P = FractionalGaussianNoise(est.hurst, d)
+    # gy = collect(1:n) .+ k  # grid of prediction
+    # gx = 1:k  # grid of samples
+
+    gy = t -> t .+ collect(1:n)
+    gx = t -> collect(t-k*u+1:u:t)
+
+    # covariance matrices
+    Σyy = covmat(P, gy(0))
+    Σyx = covmat(P, gy(0), gx(0))
+    Σxx = covmat(P, gx(0))
+    iΣxx = pinv(Matrix(Σxx))
+
+    α = Σyx * iΣxx  # kernels of conditional mean
+    # bias  β = μy - α * μx
+    βm = hcat([X[gy(t)] - α*X[gx(t)] for t=1:length(X) if gx(t)[1]>0 && gy(t)[end]<=length(X)]...)
+    β = median(βm, dims=2)
+
+    # conditional mean
+    # μm = hcat([α * X[gx(t)] for t=1:length(X) if gx(t)[1]>0]...)
+    # μ = median(μm, dims=2) + β
+    μ = α * X[gx(length(X))] + β
+
+    Σ = Σyy - Σyx * iΣxx * Σyx'  # conditional covariance
+
+    # prd = cond_mean_cov(FractionalGaussianNoise(est.hurst, d), n, X-μX)
+    # # μ = if :normalize in keys(kwargs)
+    # #     prd.μ / prd.C
+    # # else
+    # #     prd.μ
+    # # end
+    # C = prd.C[end,:]
+    # return (hurst=est.hurst, σ=est.σ, μ=prd.μ/LinearAlgebra.norm(C,1), C=C, Σ=prd.Σ)
+    return (hurst=est.hurst, σ=est.σ, μ=μ, Σ=Σ)
+end
+
+
+function fGn_MLE_estim_predict_old(X::AbstractVector{<:Real}, d::Integer, s::Integer, l::Integer, k::Integer, u::Integer, n::Integer; dmode::Symbol=:regular, kwargs...)
+    N = length(X)  # number of samples
+
+    # when sub window equals to rolling window then `rolling_vectorize()` has no effect
+    est = fGn_MLE_estim(X, d, s, l; kwargs...)
+
+    # convention of time arrow: from left to right
+    sgrid::AbstractVector{<:Integer} = Int[]  # grid of historical samples
+    S::AbstractVector{<:Real} = Real[]  # value of historical samples
+
+    if dmode == :logscale  # logscale downsampling
+        tidx = findall(reverse(logtrain(N, N÷u)))
+        # select the last k samples
+        sgrid = (k==0 || k>=length(tidx)) ? tidx : tidx[end-k+1:end]
+        S = X[sgrid]
+    else # regular downsampling
+        Sm = vec2mat(X, u, keep=:tail)
+        S0 = mean(Sm, dims=1)[:]
+        # S0 = Sm[1,:]
+        S = (k==0 || k>=length(S0)) ? S0 : S0[end-k+1:end]
+        sgrid = u*(1:length(S))
+    end
+
+    # conditional mean and covariance
+    pgrid = sgrid[end] .+ (1:n)  # grid of prediction
+    prd = cond_mean_cov(FractionalGaussianNoise(est.hurst, d), pgrid, sgrid, S)
+    C = prd.C[end,:]
+
+    return (hurst=est.hurst, σ=est.σ, μ=prd.μ, C=C, Σ=prd.Σ)
+    # return hurst, σ, μ, σ^2*Σ
+end
+
 
 """
 Power-law estimator and predictor.
@@ -63,43 +147,3 @@ end
 #     μc = Cv * X[s, end-l+1:end]
 #     return H, σ, μc
 # end
-
-
-
-"""
-Maximum likelihood estimation and prediction of fGn.
-
-# Args
-- s,l: sub window size, length of decorrelation
-- k,u,n: number of samples, downsampling factor, step of prediction
-"""
-function fGn_MLE_estim_predict(X::AbstractVector{<:Real}, d::Integer, s::Integer, l::Integer, k::Integer, u::Integer, n::Integer; dmode::Symbol=:regular)
-    N = length(X)  # number of samples
-
-    # when sub window equals to rolling window then `rolling_vectorize()` has no effect
-    hurst, σ, L, opm = fGn_MLE_estim(X, d, s, l; method=:optim, ε=1e-2)
-
-    # convention of time arrow: from left to right
-    sgrid::AbstractVector{<:Integer} = Int[]  # grid of historical samples
-    S::AbstractVector{<:Real} = Real[]  # value of historical samples
-
-    if dmode == :logscale  # logscale downsampling
-        tidx = findall(reverse(logtrain(N, N÷u)))
-        # select the last k samples
-        sgrid = (k==0 || k>=length(tidx)) ? tidx : tidx[end-k+1:end]
-        S = X[sgrid]
-    else # regular downsampling
-        Sm = vec2mat(X, u, keep=:tail)
-        S0 = mean(Sm, dims=1)[:]
-        # S0 = Sm[1,:]
-        S = (k==0 || k>=length(S0)) ? S0 : S0[end-k+1:end]
-        sgrid = u*(1:size(S,1))
-    end
-
-    # conditional mean and covariance
-    pgrid = sgrid[end] .+ (1:n)  # grid of prediction
-    μ, Σ = cond_mean_cov(FractionalGaussianNoise(hurst, d), pgrid, sgrid, S)
-
-    return hurst, σ, μ, σ^2*Σ
-end
-

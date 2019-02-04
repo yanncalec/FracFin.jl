@@ -167,7 +167,7 @@ Accelerated fWn-MLE by dividing a large vector of samples into smaller ones.
 The MLE method can be expensive on data of large dimensions due to the inversion of covariance matrix. This function accelerates the MLE method by dividing a large vector `X` into smaller vectors of size `s` downsampled by a factor `l`. The smaller vectors are treated by MLE as i.i.d. samples.
 
 # Args
-- X: sample vector or matrix. For matrix each column is a sample.
+- X: sample path of a fWn.
 - ψ: wavelet filter used for computing `X`.
 - s: sub window size
 - l: length of decorrelation
@@ -209,7 +209,7 @@ end
 Accelerated fGn-MLE by dividing a large vector of samples into smaller ones.
 
 # Args
-- X: sample vector or matrix of fGn. For matrix each column is a sample.
+- X: sample path of fGn.
 - d: time lag of the finite difference operator used for computing `X`.
 - s: sub window size
 - l: length of decorrelation
@@ -432,7 +432,7 @@ end
 
 ####### Generalized scalogram #######
 
-"""
+"""TODO
 B-Spline scalogram estimator for Hurst exponent and volatility.
 
 # Args
@@ -474,7 +474,7 @@ function bspline_scalogram_estim(S::AbstractVector{<:Real}, sclrng::AbstractVect
     # return hurst, σ
 end
 
-function bspline_scalogram_estim(S::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, v::Integer; p::Real=2., mode::Symbol=:center)
+function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, v::Integer; p::Real=2., mode::Symbol=:center)
     @assert length(S) == length(sclrng)
     @assert any(sclrng .% 2 .== 0)  # all scales must be even
 

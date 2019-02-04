@@ -79,6 +79,7 @@ include("Tool.jl")
 include("CHA.jl")
 include("Stat.jl")
 include("Estimator.jl")
+include("Predictor.jl")
 include("Rolling.jl")
 include("Trading.jl")
 
