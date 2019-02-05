@@ -261,6 +261,9 @@ function bfill!(X::AbstractVector{<:Number})
 end
 bfill(X) = bfill!(copy(X))
 
+fbfill(X) = bfill(ffill(X))
+bffill(X) = ffill(bfill(X))
+
 
 """
 Split an object of `TimeArray` by applying truncation.
