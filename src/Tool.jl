@@ -218,7 +218,7 @@ row_normalize!(A) = col_normalize!(transpose(A))
 
 
 """
-Compute d-lag finite difference of a vector or matrix (in row direction).
+Compute d-lag finite difference of a vector or matrix (along the row direction or vertically).
 """
 function lagdiff(X::AbstractVecOrMat{<:Number}, d::Integer, mode::Symbol=:causal)
     dX = fill(NaN, size(X))
@@ -263,6 +263,20 @@ bfill(X) = bfill!(copy(X))
 
 fbfill(X) = bfill(ffill(X))
 bffill(X) = ffill(bfill(X))
+
+
+function remove_outliers!(X::AbstractVector{<:Number})
+    dX = lagdiff(X, 10, :causal)
+    nidc = isnan.(dX)
+    μ = median(dX[.!nidc])
+    σ = median(abs.(dX[.!nidc] .- μ))
+    # μ = mean(dX[.!nidc])
+    # σ = std(dX[.!nidc])
+    oidc = abs.(dX.-μ) .> 10σ
+    X[oidc] .= NaN
+
+    return X
+end
 
 
 """

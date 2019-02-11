@@ -366,12 +366,21 @@ end
 """
 Embedding.
 """
-function emb(x::AbstractVector{<:Number}, mask::AbstractVector{Bool})
-    idx = findall(mask)
+function emb(x::AbstractVector{<:Number}, idx::AbstractVector{<:Integer}, N::Integer, v::Number=NaN)
     @assert length(x) <= length(idx)
-    y = zeros(T, length(mask))
+    @assert all(0 .< idx .<= N)
+    y = zeros(eltype(x), N) * v
     y[idx] = x
     return y
+end
+
+function emb(x::AbstractVector{<:Number}, mask::AbstractVector{Bool}, args...)
+    idx = findall(mask)
+    return emb(x, findall(mask), length(mask), args...)
+    # @assert length(x) <= length(idx)
+    # y = zeros(T, length(mask))
+    # y[idx] = x
+    # return y
 end
 
 

@@ -51,10 +51,14 @@ function portfolio_value(A::AbstractVector{<:Real}, B::AbstractVector{<:Real}, P
     # @assert 1 >= C >= 0
     L = min(length(A), length(P))
 
+    Ask = view(A, 1:L)
+    Bid = view(B, 1:L)
+    Price = view(P, 1:L)
+
     # The portfolio value is the sum of 1) the cash value and 2) the spot value of asset.
     # 1) The cash value at time t is the cumulation of historical gain in cash.
     # 2) The spot value of asset at time t is the quantity of asset in possesion times the spot price.
-    return cumsum((1-C) * (A[1:L].*P[1:L]) - (1+C) * (B[1:L].*P[1:L])) + cumsum(B-A)[1:L] .* P[1:L]
+    return cumsum((1-C) * (Ask.*Price) - (1+C) * (Bid.*Price)) + cumsum(Bid-Ask) .* Price
 end
 
 
