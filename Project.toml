@@ -1,9 +1,17 @@
+name = "FracFin"
+uuid = "33a65ed6-2e0a-11e9-3c42-e338a257a4c3"
+authors = ["Han Wang <han.wang.fr@gmail.com>"]
+version = "0.1.0"
+
 [deps]
 DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 Formatting = "59287772-0a20-5a39-b81b-1366585eb4c0"
 GLM = "38e38edf-8417-5370-95a0-9cbb8c7f171a"
+IJulia = "7073ff75-c697-5162-941a-fcdaad2a7d2a"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 PkgTemplates = "14b8a8f1-9102-5b29-a752-f990bacb7fe1"

@@ -1,1 +1,16 @@
+# Do not include packages already in stdlib like LinearAlgebra, Statistics etc.
+
 julia 1.0
+
+Formatting
+DSP
+DataFrames
+GLM
+Optim
+PyCall
+QuadGK
+# RCall  # some functions may fail, turn this on and add RCall
+SpecialFunctions
+StatsBase
+TimeSeries
+Wavelets
