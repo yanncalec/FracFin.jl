@@ -1,6 +1,20 @@
 ########## Utility functions ##########
 
 """
+Remove columns or rows containing nans.
+"""
+function remove_nan(X::AbstractVecOrMat; dims::Integer=1)
+    if ndims(X) == 1
+        idx = findall(.!isnan.(X))
+        return view(X, idx), idx
+    else
+        idx = findall(vec(.!any(isnan.(X), dims=dims)))  # on a vector sum(X, dims=2) gives X
+        return dims==1 ? view(X, :, idx) : view(X, idx, :), idx
+    end
+end
+
+
+"""
 Return indexes of common elements of two vectors.
 """
 function common_elements(tx::AbstractVector, ty::AbstractVector)

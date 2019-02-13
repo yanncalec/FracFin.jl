@@ -122,42 +122,56 @@ Maximum likelihood estimation of Hurst exponent and volatility for fractional Wa
 - H, σ, L, obj: estimation of Hurst exponent, of volatility, log-likelihood, object of optimizer
 
 # Notes
-- The MLE is known for its sensitivivity to mis-specification of model. In particular the fGn-MLE is sensitive to NaN value and outliers.
+- The MLE is known for its sensitivivity to mis-specification of model, as well as to missing value (NaN) and outliers.
 """
-function fWn_MLE_estim(X::AbstractVecOrMat{<:Real}, ψ::AbstractVector{<:Real}, G::AbstractVector{<:Integer}=Int[]; method::Symbol=:optim, ε::Real=1e-2)
-    # @assert 0. < ε < 1.
-    if length(G)>0
-        @assert length(G) == size(X,1)
-        @assert minimum(abs.(diff(sort(G)))) > 0  # all elements are distinct
-    end
-
-    func = h -> -fWn_log_likelihood_H(X, h, ψ, G)
-
-    opm = nothing
-    hurst = nothing
-
-    if method == :optim
-        # Gradient-free constrained optimization
-        opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
-        # # Gradient-based optimization
-        # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
-        # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
-        hurst = Optim.minimizer(opm)[1]
-    elseif method == :table
-        Hs = collect(ε:ε:1-ε)
-        hurst = Hs[argmin([func(h) for h in Hs])]
+function fWn_MLE_estim(X0::AbstractVecOrMat{<:Real}, ψ::AbstractVector{<:Real}, G0::AbstractVector{<:Integer}=Int[]; method::Symbol=:optim, ε::Real=1e-2, nan::Symbol=:ignore)
+    # Preprocessing of nans
+    X, idx = if nan==:ignore
+        remove_nan(X0, dims=1)  # works for both matrix or vector input
+    elseif nan==:keep
+        X0, 1:(size(X0)[end])
     else
-        throw("Unknown method: ", method)
+        error("Unknown method for NaN values")
     end
+    G::AbstractVector = length(G0)>0 ? G0[idx] : G0  # change accordingly the grid of samples
 
-    proc = FractionalWaveletNoise(hurst, ψ)
-    Σ = covmat(proc, length(G)>0 ? G : size(X,1))
-    σ = sqrt(xiAx(Σ, X) / length(X))
-    L = log_likelihood_H(Σ, X)
-    # # or equivalently
-    # L = log_likelihood(σ^2*Σ, X)
+    # @assert 0. < ε < 1.    
+    if length(X) == 0  # for empty input
+        return (hurst=NaN, σ=NaN, loglikelihood=NaN, optimizer=nothing)
+    else
+        if length(G)>0
+            @assert length(G) == size(X,1)
+            @assert minimum(abs.(diff(sort(G)))) > 0  # all elements are distinct
+        end
 
-    return (hurst=hurst, σ=σ, loglikelihood=L, optimizer=opm)
+        func = h -> -fWn_log_likelihood_H(X, h, ψ, G)
+
+        opm = nothing
+        hurst = nothing
+
+        if method == :optim
+            # Gradient-free constrained optimization
+            opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+            # # Gradient-based optimization
+            # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+            # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+            hurst = Optim.minimizer(opm)[1]
+        elseif method == :table
+            Hs = collect(ε:ε:1-ε)
+            hurst = Hs[argmin([func(h) for h in Hs])]
+        else
+            throw("Unknown method: ", method)
+        end
+
+        proc = FractionalWaveletNoise(hurst, ψ)
+        Σ = covmat(proc, length(G)>0 ? G : size(X,1))
+        σ = sqrt(xiAx(Σ, X) / length(X))
+        L = log_likelihood_H(Σ, X)
+        # # or equivalently
+        # L = log_likelihood(σ^2*Σ, X)
+
+        return (hurst=hurst, σ=σ, loglikelihood=L, optimizer=opm)
+    end
 end
 
 
@@ -172,8 +186,9 @@ The MLE method can be expensive on data of large dimensions due to the inversion
 - s: sub window size
 - l: length of decorrelation
 """
-function fWn_MLE_estim(X::AbstractVector{<:Real}, ψ::AbstractVector{<:Real}, s::Integer, l::Integer; kwargs...)
-    t, V = rolling_vectorize(X, s, 1, l; mode=:causal)
+function fWn_MLE_estim(X::AbstractVector{<:Real}, ψ::AbstractVector{<:Real}, s::Integer, l::Integer; kwargs...)    
+    t, V = rolling_vectorize(X, s, 1, l; mode=:causal)  # will be empty if `s>length(X)`
+    
     return fWn_MLE_estim(V, ψ; kwargs...)  # The regular grid is implicitely used here.
 end
 
@@ -264,38 +279,42 @@ Maximum likelihood estimation of Hurst exponent and volatility for fWn bank.
 """
 function fWn_MLE_estim(X::AbstractVecOrMat{<:Real}, F::AbstractVector{<:AbstractVector{<:Real}}, G::AbstractVector{<:Integer}=Int[]; method::Symbol=:optim, ε::Real=1e-2)
     # @assert 0. < ε < 1.
-    if length(G)>0
-        @assert size(X,1) == length(F) * length(G)
-        @assert minimum(abs.(diff(sort(G)))) > 0  # all elements are distinct
+
+    if length(X) == 0  # for empty input
+        return (hurst=NaN, σ=NaN, loglikelihood=NaN, optimizer=nothing)
     else
-        @assert size(X,1) % length(F) == 0
+        if length(G)>0
+            @assert size(X,1) == length(F) * length(G)
+            @assert minimum(abs.(diff(sort(G)))) > 0  # all elements are distinct
+        else
+            @assert size(X,1) % length(F) == 0
+        end
+
+        func = h -> -fWn_log_likelihood_H(X, h, F, G)
+        opm = nothing
+        hurst = nothing
+
+        if method == :optim
+            # Gradient-free constrained optimization
+            opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+            # # Gradient-based optimization
+            # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+            # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+            hurst = Optim.minimizer(opm)[1]
+        elseif method == :table
+            Hs = collect(ε:ε:1-ε)
+            hurst = Hs[argmin([func(h) for h in Hs])]
+        else
+            throw("Unknown method: ", method)
+        end
+
+        proc = FractionalWaveletNoiseBank(hurst, F)
+        Σ = covmat(proc, length(G)>0 ? G : size(X,1)÷length(F))
+        σ = sqrt(xiAx(Σ, X) / length(X))
+        L = log_likelihood_H(Σ, X)
+
+        return (hurst=hurst, σ=σ, loglikelihood=L, optimizer=opm)
     end
-
-    func = h -> -fWn_log_likelihood_H(X, h, F, G)
-
-    opm = nothing
-    hurst = nothing
-
-    if method == :optim
-        # Gradient-free constrained optimization
-        opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
-        # # Gradient-based optimization
-        # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
-        # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
-        hurst = Optim.minimizer(opm)[1]
-    elseif method == :table
-        Hs = collect(ε:ε:1-ε)
-        hurst = Hs[argmin([func(h) for h in Hs])]
-    else
-        throw("Unknown method: ", method)
-    end
-
-    proc = FractionalWaveletNoiseBank(hurst, F)
-    Σ = covmat(proc, length(G)>0 ? G : size(X,1)÷length(F))
-    σ = sqrt(xiAx(Σ, X) / length(X))
-    L = log_likelihood_H(Σ, X)
-
-    return (hurst=hurst, σ=σ, loglikelihood=L, optimizer=opm)
 end
 
 
@@ -304,6 +323,7 @@ Accelerated MLE.
 """
 function fWn_MLE_estim(X::AbstractMatrix{<:Real}, F::AbstractVector{<:AbstractVector{<:Real}}, s::Integer, l::Integer; kwargs...)
     t, V = rolling_vectorize(X, s, 1, l; mode=:causal)
+
     return fWn_MLE_estim(V, F; kwargs...)  # regular grid is implicitely used here.
 end
 
@@ -355,65 +375,69 @@ julia> X = transpose(lagdiff(W, lags, :causal))
 - Y = (y_k)_k, with y_k := 𝐄[|Δ_{kδ} B^{H}(t)|^p], X = (x_k)_k, with x_k := p * log(k)
 """
 function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}; p::Real=2., method::Symbol=:optim)
-    @assert length(lags) == size(X,1) > 1
-    @assert all(lags .>= 1)
-    # @assert p > 0. && kt > 0
-
-    # remove columns containing NaN
-    idx = findall(vec(.!any(isnan.(X), dims=1)))
-    X = X[:,idx] # view(X,:,idx)
-
-    xp = p * log.(lags)
-    μX = mean(X, dims=2)
-    yp = vec(log.(mean((abs.(X.-μX)).^p, dims=2)))
-
-    hurst, η = NaN, NaN
-
-    # old version with weights
-    # # polynomial order of the weight for samples, if 0 the uniform weight is used
-    # kt::Integer = 0  # non-zero value puts more weight on most recent samples (i.e. those at large column numbers).
-    # wt = StatsBase.weights(causal_weight(size(X,2), kt))
-    # μX = mean(X, wt, 2)
-    # yp = vec(log.(mean((abs.(X.-μX)).^p, wt, 2)))
-    # # yp = vec(log.(mean((abs.(X)).^p, wt, 2)))  # <- this gives lower SNR
-    # xp = p * log.(lags)
-    # # weight for scales
-    # ks::Integer = 0  # hard-coded: polynomial order of weight for scales, if 0 the uniform weight is used
-    # ws = StatsBase.weights(poly_weight(length(yp), ks))
-    # yc = yp .- mean(yp, ws)
-    # xc = xp .- mean(xp, ws)
-    # func = h -> 1/2 * sum(ws .* (yc - h*xc).^2)
-    # # func = h -> 1/2 * sum(ws .* abs.(yc - h*xc))
-
-    # estimation of H and η
-    if method==:optim
-        yc = yp .- mean(yp)
-        xc = xp .- mean(xp)
-        func = h -> 1/2 * sum((yc - h*xc).^2)
-        # Gradient-free constrained optimization
-        ɛ = 1e-2  # search hurst in the interval [ɛ, 1-ɛ]
-        opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
-        # # Gradient-based optimization
-        # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
-        # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
-        hurst = Optim.minimizer(opm)[1]
-        η = mean(yp - hurst*xp)
-    elseif method==:lm  # using GLM package
-        dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
-        opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
-        η, hurst = GLM.coef(opm)
-        # # or equivalently, by manual inversion
-        # Ap = hcat(xp, ones(length(xp))) # design matrix
-        # hurst, η = Ap \ yp
+    if length(X) == 0
+        return (hurst=NaN, σ=NaN, vars=nothing, optimizer=nothing)
     else
-        error("Unknown method $(method).")
+        @assert length(lags) == size(X,1) > 1
+        @assert all(lags .>= 1)
+        # @assert p > 0. && kt > 0
+
+        # remove columns containing NaN
+        idx = findall(vec(.!any(isnan.(X), dims=1)))
+        X = X[:,idx] # view(X,:,idx)
+
+        xp = p * log.(lags)
+        μX = mean(X, dims=2)
+        yp = vec(log.(mean((abs.(X.-μX)).^p, dims=2)))
+
+        hurst, η = NaN, NaN
+
+        # old version with weights
+        # # polynomial order of the weight for samples, if 0 the uniform weight is used
+        # kt::Integer = 0  # non-zero value puts more weight on most recent samples (i.e. those at large column numbers).
+        # wt = StatsBase.weights(causal_weight(size(X,2), kt))
+        # μX = mean(X, wt, 2)
+        # yp = vec(log.(mean((abs.(X.-μX)).^p, wt, 2)))
+        # # yp = vec(log.(mean((abs.(X)).^p, wt, 2)))  # <- this gives lower SNR
+        # xp = p * log.(lags)
+        # # weight for scales
+        # ks::Integer = 0  # hard-coded: polynomial order of weight for scales, if 0 the uniform weight is used
+        # ws = StatsBase.weights(poly_weight(length(yp), ks))
+        # yc = yp .- mean(yp, ws)
+        # xc = xp .- mean(xp, ws)
+        # func = h -> 1/2 * sum(ws .* (yc - h*xc).^2)
+        # # func = h -> 1/2 * sum(ws .* abs.(yc - h*xc))
+
+        # estimation of H and η
+        if method==:optim
+            yc = yp .- mean(yp)
+            xc = xp .- mean(xp)
+            func = h -> 1/2 * sum((yc - h*xc).^2)
+            # Gradient-free constrained optimization
+            ɛ = 1e-2  # search hurst in the interval [ɛ, 1-ɛ]
+            opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+            # # Gradient-based optimization
+            # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
+            # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
+            hurst = Optim.minimizer(opm)[1]
+            η = mean(yp - hurst*xp)
+        elseif method==:lm  # using GLM package
+            dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
+            opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
+            η, hurst = GLM.coef(opm)
+            # # or equivalently, by manual inversion
+            # Ap = hcat(xp, ones(length(xp))) # design matrix
+            # hurst, η = Ap \ yp
+        else
+            error("Unknown method $(method).")
+        end
+
+        cp = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)  # constant depending on p
+        σ = exp((η-log(cp))/p)
+
+        # return hurst, σ, (xp, yp)
+        return (hurst=hurst, σ=σ, vars=(xp,yp), optimizer=opm)
     end
-
-    cp = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)  # constant depending on p
-    σ = exp((η-log(cp))/p)
-
-    # return hurst, σ, (xp, yp)
-    return (hurst=hurst, σ=σ, vars=(xp,yp), optimizer=opm)
 end
 
 

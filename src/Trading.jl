@@ -11,8 +11,10 @@ function price2return(P::AbstractVector{<:Real}, lag::Integer, mode::Symbol=:cau
         else
             lagdiff(P, lag, mode) ./ P
         end
-    else
+    elseif method==:log
         lagdiff(log.(P), lag, mode)
+    else
+        error("Unknown method: $(method)")
     end
 end
 
