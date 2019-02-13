@@ -9,10 +9,11 @@ Apply a function on a rolling window with truncation at boundaries.
 - w: number of samples on the rolling window
 - d: downsampling factor on the rolling window
 - p: step of the rolling window
+- nan: :ignore or :keep, how to deal with nan values. 
 - mode: :causal or :anticausal
 - boundary: truncation, :hard or :soft
 """
-function rolling_apply(func::Function, X::AbstractVecOrMat, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal, boundary::Symbol=:hard)
+function rolling_apply(func::Function, X::AbstractVecOrMat, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal, boundary::Symbol=:hard)    
     return if boundary == :hard
         rolling_apply_hard(func, X, w, d, p; mode=mode)
     elseif boundary == :soft
@@ -23,18 +24,27 @@ function rolling_apply(func::Function, X::AbstractVecOrMat, w::Integer, d::Integ
 end
 
 
+"""
+# Notes
+The result is empty if `d*(w-1)+1 > L`
+"""
 function rolling_apply_hard(func::Function, X::AbstractVecOrMat, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal)
-    # @assert w>0
+    @assert w>=1 && d>=1 && p>=1
+
     L = size(X)[end]  # number of samples in X
     res = []
     if mode==:causal
-        for t=L:-p:d*w
-            V = ndims(X) == 1 ? reverse(view(X,t:-d:t-d*w+1)) : reverse(view(X,:,t:-d:t-d*w+1),dims=2)
+        gs = t -> reverse(t:-d:(t-d*(w-1)))  # grid of samples, ending by t
+        for t=L:-p:(1+d*(w-1))
+            # V = ndims(X) == 1 ? reverse(view(X,t:-d:t-d*w+1)) : reverse(view(X,:,t:-d:t-d*w+1),dims=2)  # old version, WRONG
+            V = ndims(X) == 1 ? view(X,gs(t)) : view(X,:,gs(t))
             pushfirst!(res, (t, func(V)))
         end
     else  # anti-causal
-        for t=1:p:L-d*w+1
-            V = ndims(X) == 1 ? view(X,t:d:t+d*w-1) : view(X,:,t:d:t+d*w-1)
+        gs = t -> t:d:(t+d*(w-1))  # grid of samples, starting by t
+        for t=1:p:(L-d*(w-1))
+            # V = ndims(X) == 1 ? view(X,t:d:t+d*w-1) : view(X,:,t:d:t+d*w-1)  # old version, WRONG
+            V = ndims(X) == 1 ? view(X,gs(t)) : view(X,:,gs(t))
             push!(res, (t, func(V)))
         end
     end
@@ -43,17 +53,22 @@ end
 
 
 function rolling_apply_soft(func::Function, X::AbstractVecOrMat, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal)
-    # @assert w>0
+    @assert w>=1 && d>=1 && p>=1
+
     L = size(X)[end]  # number of samples in X
     res = []
     if mode==:causal
+        gs = t -> reverse(t:-d:max(1,t-d*(w-1)))  # grid of samples, ending by t        
         for t=L:-p:1
-            V = ndims(X) == 1 ? reverse(view(X,t:-d:max(1,t-d*w+1))) : reverse(view(X,:,t:-d:max(1,t-d*w+1)),dims=2)
+            # V = ndims(X) == 1 ? reverse(view(X,t:-d:t-d*w+1)) : reverse(view(X,:,t:-d:t-d*w+1),dims=2)  # old version, WRONG
+            V = ndims(X) == 1 ? view(X,gs(t)) : view(X,:,gs(t))
             pushfirst!(res, (t, func(V)))
         end
     else  # anti-causal
+        gs = t -> t:d:min(L,t+d*(w-1))  # grid of samples, starting by t
         for t=1:p:L
-            V = ndims(X) == 1 ? view(X,t:d:min(L,t+d*w-1)) : view(X,:,t:d:min(L,t+d*w-1))
+            # V = ndims(X) == 1 ? view(X,t:d:t+d*w-1) : view(X,:,t:d:t+d*w-1)  # old version, WRONG
+            V = ndims(X) == 1 ? view(X,gs(t)) : view(X,:,gs(t))
             push!(res, (t, func(V)))
         end
     end
@@ -61,21 +76,52 @@ function rolling_apply_soft(func::Function, X::AbstractVecOrMat, w::Integer, d::
 end
 
 
+# function rolling_apply_soft(func::Function, X::AbstractVecOrMat, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal)
+#     # @assert w>0
+#     L = size(X)[end]  # number of samples in X
+#     res = []
+#     if mode==:causal
+#         for t=L:-p:1
+#             V = ndims(X) == 1 ? reverse(view(X,t:-d:max(1,t-d*w+1))) : reverse(view(X,:,t:-d:max(1,t-d*w+1)),dims=2)
+#             pushfirst!(res, (t, func(V)))
+#         end
+#     else  # anti-causal
+#         for t=1:p:L
+#             V = ndims(X) == 1 ? view(X,t:d:min(L,t+d*w-1)) : view(X,:,t:d:min(L,t+d*w-1))
+#             push!(res, (t, func(V)))
+#         end
+#     end
+#     return res
+# end
+
+
 """
 Rolling vectorization.
 
+Vectorize the contents of a rolling window and make horizontal concatenation.
+
 # Args
-- X: input vector or matrix
-- w: number of consecutive samples to be concatenated together
+- X: input vector or matrix. The window rolls in the last dimension from small to large index.
+- w: size of rolling window, or number of consecutive samples to be concatenated together
+- d: downsampling factor
 - p: period
+- mode: :causal (proceed from right to left) or :anticausal (proceed from left to right)
+
+# Returns
+A named tuple `(index, value)` which are
+- index of `X` where the rolling window starts (mode=:anticausal) or ends (mode=:causal, default)
+- output matrix that row dimension equals to `w` if parameters are valid, otherwise it is an empty matrix.
 """
-function rolling_vectorize(X::AbstractVecOrMat{<:Number}, w::Integer, d::Integer=1, p::Integer=1; kwargs...)
+function rolling_vectorize(X::AbstractVecOrMat{T}, w::Integer, d::Integer=1, p::Integer=1; kwargs...) where {T<:Number}
     # res = rolling_apply_hard(x->vec(hcat(x...)), X, w, 1, p; kwargs...)
     # res = rolling_apply_hard(x->vec(x), X, w, 1, p; kwargs...)
     res = rolling_apply_hard(x->vec(x), X, w, d, p; kwargs...)
-    tidx = [x[1] for x in res]
-
-    return tidx, hcat([x[2] for x in res]...)
+    
+    tidx::Vector{Integer} = [x[1] for x in res]
+    # In case of empty array `hcat([]...)` gives `0-element Array{Any,1}` 
+    # Assure the return type in this case is a numerical, not `any`.
+    val::Matrix{T} = length(tidx)==0 ? Array{T}(undef,0,0) : hcat([x[2] for x in res]...)
+    return (index=tidx, value=val)
 end
 
 
