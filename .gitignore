@@ -1,4 +1,6 @@
 .DS_Store
+Manifest.toml
+
 obslt/
 docs/build
 obslt*
