@@ -15,6 +15,29 @@ end
 
 
 """
+    emb(x, idx, N, v=NaN)
+
+Embedding of a vector `x` in a bigger vector of length `N` at the indices `idx`. The other indices are filled by `v`.
+"""
+function emb(x::AbstractVector{T}, idx::AbstractVector{<:Integer}, N::Integer, v::T=NaN) where {T<:Number}
+    @assert length(x) == length(idx)
+    @assert all(0 .< idx .<= N)
+    y = zeros(eltype(x), N) * v
+    y[idx] .= x
+    return y
+end
+
+function emb(x::AbstractVector{<:Number}, mask::AbstractVector{Bool}, args...)
+    idx = findall(mask)
+    return emb(x, findall(mask), length(mask), args...)
+    # @assert length(x) <= length(idx)
+    # y = zeros(T, length(mask))
+    # y[idx] = x
+    # return y
+end
+
+
+"""
 Return indexes of common elements of two vectors.
 """
 function common_elements(tx::AbstractVector, ty::AbstractVector)
@@ -373,7 +396,7 @@ function equalize_daynight(sdata::AbstractVector)
     N = ndims(sdata[1])
     @assert N<=2
     edata = [sdata[1]]
-    func = (x,y) -> (N==2) ? x[[1],:]-y[[end],:] : x[1]-y[end]
+    func = (x,y) -> (N==2) ? x[[1],:]-y[[end],:] : x[[1]]-y[[end]]
 
     for n=2:length(sdata)
         d0 = TimeSeries.values(edata[n-1])
@@ -381,6 +404,7 @@ function equalize_daynight(sdata::AbstractVector)
         t1 = TimeSeries.timestamp(sdata[n])
         # push!(edata, TimeSeries.TimeArray(t1, d1.-(d1[1]-d0[end]), TimeSeries.colnames(sdata[1])))  # <- TODO: d0[end] or d1[1] is NaN? d1 is 2d array?
         dv = func(d1,d0)
+        # println(typeof(dv))
         dv[isnan.(dv)] .= 0  # <- this makes the operation nan-safe
         push!(edata, TimeSeries.TimeArray(t1, d1.-dv, TimeSeries.colnames(sdata[1])))  # <- TODO: d0[end] or d1[1] is NaN? d1 is 2d array?
     end

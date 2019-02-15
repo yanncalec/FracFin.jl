@@ -9,11 +9,11 @@ Apply a function on a rolling window with truncation at boundaries.
 - w: number of samples on the rolling window
 - d: downsampling factor on the rolling window
 - p: step of the rolling window
-- nan: :ignore or :keep, how to deal with nan values. 
+- nan: :ignore or :keep, how to deal with nan values.
 - mode: :causal or :anticausal
 - boundary: truncation, :hard or :soft
 """
-function rolling_apply(func::Function, X::AbstractVecOrMat, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal, boundary::Symbol=:hard)    
+function rolling_apply(func::Function, X::AbstractVecOrMat, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal, boundary::Symbol=:hard)
     return if boundary == :hard
         rolling_apply_hard(func, X, w, d, p; mode=mode)
     elseif boundary == :soft
@@ -58,7 +58,7 @@ function rolling_apply_soft(func::Function, X::AbstractVecOrMat, w::Integer, d::
     L = size(X)[end]  # number of samples in X
     res = []
     if mode==:causal
-        gs = t -> reverse(t:-d:max(1,t-d*(w-1)))  # grid of samples, ending by t        
+        gs = t -> reverse(t:-d:max(1,t-d*(w-1)))  # grid of samples, ending by t
         for t=L:-p:1
             # V = ndims(X) == 1 ? reverse(view(X,t:-d:t-d*w+1)) : reverse(view(X,:,t:-d:t-d*w+1),dims=2)  # old version, WRONG
             V = ndims(X) == 1 ? view(X,gs(t)) : view(X,:,gs(t))
@@ -116,32 +116,20 @@ function rolling_vectorize(X::AbstractVecOrMat{T}, w::Integer, d::Integer=1, p::
     # res = rolling_apply_hard(x->vec(hcat(x...)), X, w, 1, p; kwargs...)
     # res = rolling_apply_hard(x->vec(x), X, w, 1, p; kwargs...)
     res = rolling_apply_hard(x->vec(x), X, w, d, p; kwargs...)
-    
+
     tidx::Vector{Integer} = [x[1] for x in res]
-    # In case of empty array `hcat([]...)` gives `0-element Array{Any,1}` 
+    # In case of empty array `hcat([]...)` gives `0-element Array{Any,1}`
     # Assure the return type in this case is a numerical, not `any`.
     val::Matrix{T} = length(tidx)==0 ? Array{T}(undef,0,0) : hcat([x[2] for x in res]...)
     return (index=tidx, value=val)
 end
 
 
-# function rolling_vectorize(X::AbstractVector{<:AbstractArray{<:Number}}, w::Integer, p::Integer=1; kwargs...)
-#     res = rolling_apply_hard(x->vec(hcat(x...)), X, 1, w, p; kwargs...)
-#     # return [x[1] for x in res], [x[2] for x in res]
-#     return [x[2] for x in res]
-# end
-
-# function rolling_vectorize(X0::AbstractVecOrMat{T}, w::Integer, d::Integer=1) where {T<:Number}
-#     res = rolling_apply_hard(x->vec(x), X0, w, d)
-#     return hcat(res...)
-# end
-
-
 """
 Rolling mean in row direction.
 """
-function rolling_mean(X::AbstractVecOrMat{<:Number}, w::Integer; kwargs...)
-    res = rolling_apply(x->mean(x, dims=1), X, w, 1, 1; kwargs...)
+function rolling_mean(X::AbstractVecOrMat{<:Number}, w::Integer, d::Integer=1, p::Integer=1; kwargs...)
+    res = rolling_apply(x->mean(x, dims=1), X, w, d, p; kwargs...)
     Xm = hcat([x[2] for x in res]...)[:]
     # tidx = [x[1] for x in res]
     return Xm
@@ -150,8 +138,8 @@ end
 """
 Rolling median in row direction.
 """
-function rolling_median(X::AbstractVecOrMat{<:Number}, w::Integer; kwargs...)
-    res = rolling_apply(x->median(x, dims=1), X, w, 1, 1; kwargs...)
+function rolling_median(X::AbstractVecOrMat{<:Number}, w::Integer, d::Integer=1, p::Integer=1; kwargs...)
+    res = rolling_apply(x->median(x, dims=1), X, w, d, p; kwargs...)
     Xm = hcat([x[2] for x in res]...)[:]
     # tidx = [x[1] for x in res]
     return Xm

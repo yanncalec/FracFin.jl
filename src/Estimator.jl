@@ -135,7 +135,7 @@ function fWn_MLE_estim(X0::AbstractVecOrMat{<:Real}, ψ::AbstractVector{<:Real},
     end
     G::AbstractVector = length(G0)>0 ? G0[idx] : G0  # change accordingly the grid of samples
 
-    # @assert 0. < ε < 1.    
+    # @assert 0. < ε < 1.
     if length(X) == 0  # for empty input
         return (hurst=NaN, σ=NaN, loglikelihood=NaN, optimizer=nothing)
     else
@@ -185,11 +185,15 @@ The MLE method can be expensive on data of large dimensions due to the inversion
 - ψ: wavelet filter used for computing `X`.
 - s: sub window size
 - l: length of decorrelation
+
+# Notes
+The rolling vectorization returns
+- empty, if `s>size(X)[end]`
+- `X` in matrix form (i.e. same as `reshape(X, :, 1)`), if `s==size(X)[end]`
 """
-function fWn_MLE_estim(X::AbstractVector{<:Real}, ψ::AbstractVector{<:Real}, s::Integer, l::Integer; kwargs...)    
-    t, V = rolling_vectorize(X, s, 1, l; mode=:causal)  # will be empty if `s>length(X)`
-    
-    return fWn_MLE_estim(V, ψ; kwargs...)  # The regular grid is implicitely used here.
+function fWn_MLE_estim(X::AbstractVector{<:Real}, ψ::AbstractVector{<:Real}, s::Integer, l::Integer; kwargs...)
+    t, V = rolling_vectorize(X, s, 1, l; mode=:causal)
+    fWn_MLE_estim(V, ψ; kwargs...)  # The regular grid is implicitely used here.
 end
 
 
@@ -322,7 +326,7 @@ end
 Accelerated MLE.
 """
 function fWn_MLE_estim(X::AbstractMatrix{<:Real}, F::AbstractVector{<:AbstractVector{<:Real}}, s::Integer, l::Integer; kwargs...)
-    t, V = rolling_vectorize(X, s, 1, l; mode=:causal)
+    t, V = rolling_vectorize(X, s, 1, l; mode=:causal)  # TODO: case s = size(X,2)
 
     return fWn_MLE_estim(V, F; kwargs...)  # regular grid is implicitely used here.
 end
