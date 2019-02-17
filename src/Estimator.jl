@@ -94,17 +94,19 @@ log_likelihood_H(A::AbstractMatrix, X::AbstractVector, args...) = log_likelihood
 
 Log-likelihood of a fWn model with the optimal volatility.
 """
-function fWn_log_likelihood_H(X::AbstractVecOrMat{<:Real}, H::Real, ψ::AbstractVector{<:Real}, G::AbstractVector{<:Integer}=Int[])
+function fWn_log_likelihood_H(X::AbstractVecOrMat{<:Real}, H::Real, ψ::AbstractVector{<:Real}, G::AbstractVector{<:Integer})
+    @assert length(G) == size(X,1)
     proc = FractionalWaveletNoise(H, ψ)
+    return log_likelihood_H(covmat(proc, G), X)
 
-    Σ::AbstractMatrix = if length(G)>0
-        @assert length(G) == size(X,1)
-        covmat(proc, G)
-    else
-        covmat(proc, size(X,1))
-    end
+    # Σ::AbstractMatrix = if length(G)>0
+    #     @assert length(G) == size(X,1)
+    #     covmat(proc, G)
+    # else
+    #     covmat(proc, size(X,1))
+    # end
 
-    return log_likelihood_H(Σ, X)
+    # return log_likelihood_H(Σ, X)
 end
 
 
@@ -124,25 +126,17 @@ Maximum likelihood estimation of Hurst exponent and volatility for fractional Wa
 # Notes
 - The MLE is known for its sensitivivity to mis-specification of model, as well as to missing value (NaN) and outliers.
 """
-function fWn_MLE_estim(X0::AbstractVecOrMat{<:Real}, ψ::AbstractVector{<:Real}, G0::AbstractVector{<:Integer}=Int[]; method::Symbol=:optim, ε::Real=1e-2, nan::Symbol=:ignore)
-    # Preprocessing of nans
-    X, idx = if nan==:ignore
-        remove_nan(X0, dims=1)  # works for both matrix or vector input
-    elseif nan==:keep
-        X0, 1:(size(X0)[end])
-    else
-        error("Unknown method for NaN values")
-    end
-    G::AbstractVector = length(G0)>0 ? G0[idx] : G0  # change accordingly the grid of samples
-
+function fWn_MLE_estim(X::AbstractVecOrMat{<:Real}, ψ::AbstractVector{<:Real}, G::AbstractVector{<:Integer}=1:size(X,1); method::Symbol=:optim, ε::Real=1e-2)
     # @assert 0. < ε < 1.
-    if length(X) == 0  # for empty input
+    if length(X) == 0 || any(isnan.(X))  # for empty input or input containing nans
         return (hurst=NaN, σ=NaN, loglikelihood=NaN, optimizer=nothing)
     else
-        if length(G)>0
-            @assert length(G) == size(X,1)
-            @assert minimum(abs.(diff(sort(G)))) > 0  # all elements are distinct
-        end
+        @assert length(G) == size(X,1)  # dimension matches
+        @assert minimum(abs.(diff(sort(G)))) > 0  # all elements are distinct
+        # if length(G)>0
+        #     @assert length(G) == size(X,1)
+        #     @assert minimum(abs.(diff(sort(G)))) > 0  # all elements are distinct
+        # end
 
         func = h -> -fWn_log_likelihood_H(X, h, ψ, G)
 
@@ -164,7 +158,8 @@ function fWn_MLE_estim(X0::AbstractVecOrMat{<:Real}, ψ::AbstractVector{<:Real},
         end
 
         proc = FractionalWaveletNoise(hurst, ψ)
-        Σ = covmat(proc, length(G)>0 ? G : size(X,1))
+        # Σ = covmat(proc, length(G)>0 ? G : size(X,1))
+        Σ = covmat(proc, G)
         σ = sqrt(xiAx(Σ, X) / length(X))
         L = log_likelihood_H(Σ, X)
         # # or equivalently
@@ -184,6 +179,7 @@ The MLE method can be expensive on data of large dimensions due to the inversion
 - X: sample path of a fWn.
 - ψ: wavelet filter used for computing `X`.
 - s: sub window size
+- u: downsampling factor
 - l: length of decorrelation
 
 # Notes
@@ -191,9 +187,11 @@ The rolling vectorization returns
 - empty, if `s>size(X)[end]`
 - `X` in matrix form (i.e. same as `reshape(X, :, 1)`), if `s==size(X)[end]`
 """
-function fWn_MLE_estim(X::AbstractVector{<:Real}, ψ::AbstractVector{<:Real}, s::Integer, l::Integer; kwargs...)
-    t, V = rolling_vectorize(X, s, 1, l; mode=:causal)
-    fWn_MLE_estim(V, ψ; kwargs...)  # The regular grid is implicitely used here.
+function fWn_MLE_estim(X::AbstractVector{<:Real}, ψ::AbstractVector{<:Real}, s::Integer, u::Integer, l::Integer, bootstrap::Bool=false; kwargs...)
+    t, V = rolling_vectorize(X, s, u, l; mode=:causal)
+    G = 0:u:u*(size(V,1)-1)
+
+    fWn_MLE_estim(V, ψ, G; kwargs...)  # The regular grid is implicitely used here.
 end
 
 
@@ -219,7 +217,7 @@ Maximum likelihood estimation of Hurst exponent and volatility for fractional Ga
 # Notes
 - The implementation here is based on fWn (a fGn is a fWn with the filter of type `[1,-1]`) and it is just a wrapper of `fWn_MLE_estim()`. See the file `Misc.jl` for an implementation based on fGn.
 """
-function fGn_MLE_estim(X::AbstractVecOrMat{<:Real}, d::Integer, G::AbstractVector{<:Integer}=Int[]; kwargs...)
+function fGn_MLE_estim(X::AbstractVecOrMat{<:Real}, d::Integer, G::AbstractVector{<:Integer}=size(X,1); kwargs...)
     fWn_MLE_estim(X, fGn_filter(d), G; kwargs...)
 end
 
@@ -230,11 +228,20 @@ Accelerated fGn-MLE by dividing a large vector of samples into smaller ones.
 # Args
 - X: sample path of fGn.
 - d: time lag of the finite difference operator used for computing `X`.
+- u: downsampling factor
 - s: sub window size
 - l: length of decorrelation
 """
+function fGn_MLE_estim(X::AbstractVector{<:Real}, d::Integer, s::Integer, u::Integer, l::Integer; kwargs...)
+    # @assert d%u == 0  # downsampling factor must divide time scale
+    fWn_MLE_estim(X, fGn_filter(d), s, u, l; kwargs...)
+end
+
+"""
+For compatibility reason.
+"""
 function fGn_MLE_estim(X::AbstractVector{<:Real}, d::Integer, s::Integer, l::Integer; kwargs...)
-    fWn_MLE_estim(X, fGn_filter(d), s, l; kwargs...)
+    fWn_MLE_estim(X, fGn_filter(d), s, 1, l; kwargs...)
 end
 
 

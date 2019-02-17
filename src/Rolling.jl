@@ -9,7 +9,8 @@ Apply a function on a rolling window with truncation at boundaries.
 - w: number of samples on the rolling window
 - d: downsampling factor on the rolling window
 - p: step of the rolling window
-- nan: :ignore or :keep, how to deal with nan values.
+
+# Kwargs
 - mode: :causal or :anticausal
 - boundary: truncation, :hard or :soft
 """

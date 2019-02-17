@@ -232,7 +232,7 @@ Compute the covariance matrix between the grid `G1` and `G2` of a standard (cont
 function covmat(X::FractionalWaveletNoise, G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, δ::Real=1)
     Σ = zeros(length(G1),length(G2))
     for (c,s) in enumerate(G2), (r,t) in enumerate(G1)
-        Σ[r,c] = autocov(X, t-s, δ)
+        Σ[r,c] = fWn_autocov(X, t-s, δ)
     end
 
     return Σ
