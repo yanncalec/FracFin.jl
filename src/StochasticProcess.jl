@@ -174,7 +174,7 @@ end
 
 
 """
-Compute the auto-covarince sequence of a stationary process on a regular grid.
+Compute the auto-covariance sequence of a stationary process on a regular grid.
 """
 function autocov!(C::AbstractVector{<:Real}, X::StationaryProcess{T}, G::AbstractVector{<:T}) where T<:TimeStyle
     # @assert isregulargrid(G)
@@ -226,20 +226,20 @@ covmat(S::AbstractVector{T}) where {T<:Real} = covmat!(zeros(T, length(S), lengt
 
 
 """
-Return the auto-covarince matrix of a stochastic process on a sampling grid.
+Return the auto-covariance matrix of a stochastic process on a sampling grid.
 """
 covmat(X::StochasticProcess, G::AbstractVector) = autocov!(zeros(length(G), length(G)), X, G)
 
 
 """
-Return the auto-covarince matrix of a stochastic process between two sampling grids.
+Return the auto-covariance matrix of a stochastic process between two sampling grids.
 
 The `(i,j)`-th coefficient in the matrix is `autocov(G1[i], G2[j])`.
 """
 covmat(X::StochasticProcess, G1::AbstractVector, G2::AbstractVector) = autocov!(zeros(length(G1), length(G2)), X, G1, G2)
 
 """
-Return the auto-covarince matrix on an integer sampling grid `1:N`.
+Return the auto-covariance matrix on an integer sampling grid `1:N`.
 """
 covmat(X::StochasticProcess, N::Integer) = covmat(X, 1:N)
 covmat(X::StochasticProcess, N::Integer, M::Integer) = covmat(X, 1:N, 1:M)

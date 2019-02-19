@@ -16,7 +16,7 @@ function xiAx(A::AbstractMatrix{<:Real}, X::AbstractVecOrMat{<:Real}, ε::Real=0
     @assert issymmetric(A)
     @assert size(X, 1) == size(A, 1)
 
-    # a simple version would be:
+    # # a simple version would be:
     # return tr(X' * pinv(A) * X)
 
     # SVD is equivalent to eigen decomposition on covariance matrix
@@ -126,7 +126,7 @@ Maximum likelihood estimation of Hurst exponent and volatility for fractional Wa
 # Notes
 - The MLE is known for its sensitivivity to mis-specification of model, as well as to missing value (NaN) and outliers.
 """
-function fWn_MLE_estim(X::AbstractVecOrMat{<:Real}, ψ::AbstractVector{<:Real}, G::AbstractVector{<:Integer}=1:size(X,1); method::Symbol=:optim, ε::Real=1e-2)
+function fWn_MLE_estim(X::AbstractVecOrMat{<:Real}, ψ::AbstractVector{<:Real}, G::AbstractVector{<:Integer}=collect(1:size(X,1)); method::Symbol=:optim, ε::Real=1e-2)
     # @assert 0. < ε < 1.
     if length(X) == 0 || any(isnan.(X))  # for empty input or input containing nans
         return (hurst=NaN, σ=NaN, loglikelihood=NaN, optimizer=nothing)
@@ -158,9 +158,15 @@ function fWn_MLE_estim(X::AbstractVecOrMat{<:Real}, ψ::AbstractVector{<:Real}, 
         end
 
         proc = FractionalWaveletNoise(hurst, ψ)
+
         # Σ = covmat(proc, length(G)>0 ? G : size(X,1))
         Σ = covmat(proc, G)
+
+        # Estimation of volatility
         σ = sqrt(xiAx(Σ, X) / length(X))
+        σ *= mean(diff(G))^(hurst)  # <- why this?
+
+        # Log-likelihood
         L = log_likelihood_H(Σ, X)
         # # or equivalently
         # L = log_likelihood(σ^2*Σ, X)
@@ -189,7 +195,7 @@ The rolling vectorization returns
 """
 function fWn_MLE_estim(X::AbstractVector{<:Real}, ψ::AbstractVector{<:Real}, s::Integer, u::Integer, l::Integer, bootstrap::Bool=false; kwargs...)
     t, V = rolling_vectorize(X, s, u, l; mode=:causal)
-    G = 0:u:u*(size(V,1)-1)
+    G = collect(0:u:u*(size(V,1)-1))
 
     fWn_MLE_estim(V, ψ, G; kwargs...)  # The regular grid is implicitely used here.
 end
@@ -237,8 +243,9 @@ function fGn_MLE_estim(X::AbstractVector{<:Real}, d::Integer, s::Integer, u::Int
     fWn_MLE_estim(X, fGn_filter(d), s, u, l; kwargs...)
 end
 
+
 """
-For compatibility reason.
+Function for compatibility purpose.
 """
 function fGn_MLE_estim(X::AbstractVector{<:Real}, d::Integer, s::Integer, l::Integer; kwargs...)
     fWn_MLE_estim(X, fGn_filter(d), s, 1, l; kwargs...)

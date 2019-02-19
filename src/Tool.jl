@@ -323,17 +323,22 @@ Split an object of `TimeArray` by applying truncation.
 - data: input object of `TimeArray`
 - T: unit of time period, e.g. `Dates.Day(1)`
 - (wa,wb): relative starting and ending time w.r.t. to `T`, e.g., `Dates.Hour(9) + Dates.Minute(5)` for `09:05` and `Dates.Hour(17) + Dates.Minute(24)` for `17:24`.
-- fillmode: fill mode for nan values, :f forward, :b backward, :fb forward-backward, :bf backward-forward
+- fillmode: fill mode for nan values, :o no fill, :f forward, :b backward, :fb forward-backward, :bf backward-forward
 - endpoint: if true include the endpoint whenever possible
 
 # Notes
 """
-function window_split_timearray(data::TimeArray, T::AbstractTime, (wa,wb)::NTuple{2, Union{Nothing, AbstractTime}}=(nothing, nothing); fillmode::Symbol=:fb, endpoint::Bool=true)
+function window_split_timearray(data::TimeArray, T::AbstractTime, (wa,wb)::NTuple{2, Union{Nothing, AbstractTime}}=(nothing, nothing); ubase::Dates.TimePeriod=Dates.Minute(0), fillmode::Symbol=:fb, endpoint::Bool=true)
     stamp = TimeSeries.timestamp(data)  # time stamp
     time_begin, toto = Dates.floorceil(stamp[1], T)
     toto, time_end = Dates.floorceil(stamp[end], T)
-    unit = minimum(diff(stamp)) # ÷ Dates.Millisecond(1000)
-    # unit = Dates.Second(dt)  # time unit of data
+
+    # time unit of data
+    unit::Dates.TimePeriod = if ubase==Dates.Minute(0)
+        minimum(diff(stamp)) # ÷ Dates.Millisecond(1000)
+    else
+        ubase
+    end
 
     res = []
     for t in time_begin:T:time_end
