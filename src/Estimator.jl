@@ -474,51 +474,18 @@ end
 
 ####### Generalized scalogram #######
 
-"""TODO
+"""
 B-Spline scalogram estimator for Hurst exponent and volatility.
 
 # Args
-- S: vector of scalogram, i.e., variance of the wavelet coefficients per scale.
+- S: vector of scalogram of moment `p`, e.g., when `p=2` it is the variance of the wavelet coefficients per scale.
 - sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one row in the matrix X
-- v: vanishing moments
-- p: power by which the scalogram is computed
+- v: vanishing moments of the wavelet
+- p: power of the scalogram
 """
-function bspline_scalogram_estim(S::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, v::Integer; p::Real=2., mode::Symbol=:center)
-    @assert length(S) == length(sclrng)
-
-    C = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
-
-    # res = IRLS(log.(S), p*log.(sclrng), p)
-    # hurst::Float64 = res[1][1]-1/2
-    # β::Float64 = res[1][2][1]  # returned value is a scalar in a vector form
-    # ols::Float64 = NaN
-
-    df = DataFrames.DataFrame(xvar=log.(sclrng.^p), yvar=log.(S))
-    ols = GLM.lm(@GLM.formula(yvar~xvar), df)
-    coef = GLM.coef(ols)
-    β = coef[1]
-    hurst = coef[2]-1/2
-
-    σ = try
-        Aρ = Aρ_bspline(0, 1, hurst, v, mode)
-        exp((β - log(C) - log(abs(Aρ))*p/2)/p)
-    catch
-        NaN
-    end
-
-    return hurst, σ, ols
-
-    # Ar = hcat(xr, ones(length(xr)))  # design matrix
-    # H0, η = Ar \ yr  # estimation of H and β
-    # hurst = H0-1/2
-    # A = Aρ_bspline(0, r, hurst, v, mode)
-    # σ = exp((η - log(abs(A)))/2)
-    # return hurst, σ
-end
-
-function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, v::Integer; p::Real=2., mode::Symbol=:center)
-    @assert length(S) == length(sclrng)
-    @assert any(sclrng .% 2 .== 0)  # all scales must be even
+function bspline_scalogram_estim(S::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, v::Integer; p::Real=2.; kwargs...)
+    @assert length(S) == length(sclrng) && any(S .> 0)
+    @assert any(sclrng .% 2 .== 0) && any(sclrng .> 0)  # all scales must be positive even number
 
     xp = log.(sclrng.^p)
     yp = log.(S)
@@ -536,21 +503,22 @@ function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVect
         # Gradient-free constrained optimization
         ɛ = 1e-2  # search hurst in the interval [ɛ, 1-ɛ]
         opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
-        hurst = (Optim.minimizer(opm)[1] - 1)/2
-        η = mean(yp - (2hurst+1)*xp)
+        hurst = Optim.minimizer(opm)[1] - 1/2
+        η = mean(yp - (hurst+1/2)*xp)
     elseif method==:lm  # using GLM package
         dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
         opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
         coef = GLM.coef(opm)
         η = coef[1]
-        hurst = coef[2]-1/2
+        hurst = coef[2] - 1/2
     else
         error("Unknown method $(method).")
     end
 
     cp = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
     σ = try
-        Aρ = Aρ_bspline(0, 1, hurst, v, mode)
+        A = Aρ_bspline(0, 1, hurst, v, kwargs...)  # kwargs: mode=:center
+        @assert A>0
         exp((η - log(cp) - log(abs(Aρ))*p/2)/p)
     catch
         NaN
