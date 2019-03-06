@@ -255,25 +255,39 @@ row_normalize!(A) = col_normalize!(transpose(A))
 
 
 """
-Compute d-lag finite difference of a vector or matrix (along the row direction or vertically).
+    lagdiff(X, d; dims, mode)
+
+Compute `d`-lag finite difference of a numerical array `X` along the dimension `dims` with the `mode` (:causal, :anticausal, :valid).
 """
-function lagdiff(X::AbstractVecOrMat{<:Number}, d::Integer, mode::Symbol=:causal)
-    dX = fill(NaN, size(X))
-    if ndims(X) == 1
-        dX[d+1:end] = X[d+1:end] .- X[1:end-d]  # '-' or '.-' may raise "step cannot be zero" error on iterators like `X=1:100`, use `collect(X)`
-    else
-        dX[d+1:end,:] = X[d+1:end,:] .- X[1:end-d,:]
+function lagdiff(X::AbstractArray{<:Number}, d::Integer; dims::Integer=1, mode::Symbol=:causal)
+    dX = fill(NaN * one(eltype(X)), size(X))
+    s::Integer = if mode == :causal
+        d
+    elseif mode == :anticausal
+        0
+    else  # :valid, or :noncausal
+        d÷2
     end
-    return (mode==:causal) ? dX : circshift(dX, -d)
+    # v = (1+s):(size(dX,dims)-d+s)
+    selectdim(dX, dims, (1+s):(size(dX,dims)-d+s)) .= selectdim(collect(X), dims, d+1:size(X,dims)) .- selectdim(collect(X), dims, 1:size(X,dims)-d)
+
+    return dX
+    # old version
+    # if ndims(X) == 1
+    #     dX[d+1:end] = X[d+1:end] .- X[1:end-d]  # '-' or '.-' may raise "step cannot be zero" error on iterators like `X=1:100`, use `collect(X)`
+    # else
+    #     dX[d+1:end,:] = X[d+1:end,:] .- X[1:end-d,:]
+    # end
+    # return (mode==:causal) ? dX : circshift(dX, -d)
 end
 
-function lagdiff(X::AbstractVector{<:Number}, dlags::AbstractVector{<:Integer}, mode::Symbol=:causal)
-    return hcat([lagdiff(X, d, mode) for d in dlags]...)
+function lagdiff(X::AbstractVector{<:Number}, lags::AbstractVector{<:Integer};mode::Symbol=:causal)
+    return hcat([lagdiff(X, d; mode=mode) for d in lags]...)
 end
 
-function lagdiff(X::AbstractMatrix{<:Number}, dlags::AbstractVector{<:Integer}, mode::Symbol=:causal)
-    return reshape(hcat([lagdiff(X, d, mode) for d in dlags]...), (size(X,1),:,length(dlags)))
-end
+# function lagdiff(X::AbstractMatrix{<:Number}, dlags::AbstractVector{<:Integer}, mode::Symbol=:causal)
+#     return reshape(hcat([lagdiff(X, d, mode) for d in dlags]...), (size(X,1),:,length(dlags)))
+# end
 
 ###### Time series manipulation ######
 

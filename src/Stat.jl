@@ -1,5 +1,8 @@
 ########## General statistics ##########
 
+# normalization factor of p-th momeent of a standard normal distribution
+normal_moment_factor = p -> 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
+
 """
 Compute the symmetric polynomial weight vector.
 
@@ -212,10 +215,11 @@ function IRLS(Y::AbstractVecOrMat{<:Real}, X::AbstractVecOrMat{<:Real}, pnorm::R
     err = 0.
 
     for n=1:maxiter
+        # println("Iter=$n")
         A, β, E, Σ = linear_regression(Y, X, StatsBase.weights(w0))
         w = wfunc(E)
         err = LinearAlgebra.norm(w - w0)/LinearAlgebra.norm(w0)
-        w0 = w # / sum(w)
+        w0 = w / sum(w)
         if  err < tol
             break
         end

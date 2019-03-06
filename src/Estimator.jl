@@ -124,7 +124,7 @@ Maximum likelihood estimation of Hurst exponent and volatility for fractional Wa
 - H, σ, L, obj: estimation of Hurst exponent, of volatility, log-likelihood, object of optimizer
 
 # Notes
-- The MLE is known for its sensitivivity to mis-specification of model, as well as to missing value (NaN) and outliers.
+- The MLE is known for its sensitivity to mis-specification of model, as well as to missing value (NaN) and outliers.
 """
 function fWn_MLE_estim(X::AbstractVecOrMat{<:Real}, ψ::AbstractVector{<:Real}, G::AbstractVector{<:Integer}=collect(1:size(X,1)); method::Symbol=:optim, ε::Real=1e-2)
     # @assert 0. < ε < 1.
@@ -358,16 +358,30 @@ fWn-MLE based on B-Spline wavelet transform.
 - s, l: if given call the accelerated version of MLE
 """
 function fWn_bspline_MLE_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, v::Integer, args...; kwargs...)
-    F = [_intscale_bspline_filter(s, v)/sqrt(s) for s in sclrng]  # extra 1/sqrt(s) factor due to the implementation of DCWT
+    F = [intscale_bspline_filter(s, v)/sqrt(s) for s in sclrng]  # extra 1/sqrt(s) factor due to the implementation of DCWT
     return fWn_MLE_estim(X, F, args...; kwargs...)
 end
 
 # const fBm_bspline_MLE_estim = fWn_bspline_MLE_estim
 
 
-###### Power law estimator ######
+###### variogram estimator ######
 
-@doc raw"""
+"""
+Variance function of the empirical variogram
+"""
+function variogram_variance(H::Real, lags::AbstractVector{<:Integer}, N::Integer)
+    V = zeros(Float64, length(lags))
+
+    for (j, d) in enumerate(lags)
+        proc = FractionalGaussianNoise(H, d)
+        V[j] = autocov(proc, 0)^2 + sum((1-i/N) * autocov(proc, i)^2 for i=0:N-1)
+    end
+    return 4/N * V
+end
+
+
+"""
     powlaw_estim(X, lags; p=2., method=:optim)
 
 Power-law estimator for Hurst exponent and volatility.
@@ -387,28 +401,28 @@ Power-law estimator for Hurst exponent and volatility.
 - `X` is computed from fBm by taking finite differences. The second dimension corresponds to time. Example, let `W` be a fBm sample path then the following command computes `X`:
 ```julia
 julia> lags = 2:10
-julia> X = transpose(lagdiff(W, lags, :causal))
+julia> X = transpose(lagdiff(W, lags, mode=:causal))
 ```
 - `p=1` is robust against quantization error.
-- Y = (y_k)_k, with y_k := 𝐄[|Δ_{kδ} B^{H}(t)|^p], X = (x_k)_k, with x_k := p * log(k)
 """
-function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}; p::Real=2., method::Symbol=:optim)
+function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}; pow::Real=2., method::Symbol=:lm)
+    # remove columns containing NaN
+    idx = findall(vec(.!any(isnan.(X), dims=1)))
+    X = X[:,idx] # view(X,:,idx)
+
     if length(X) == 0
         return (hurst=NaN, σ=NaN, vars=nothing, optimizer=nothing)
     else
-        @assert length(lags) == size(X,1) > 1
-        @assert all(lags .>= 1)
-        # @assert p > 0. && kt > 0
+        @assert length(lags) == size(X,1) > 1  "Dimension mismatch."
+        @assert all(lags .>= 1)  "Lags must be larger than or equal to 1."
+        @assert pow>0  "Moment must be positive."
 
-        # remove columns containing NaN
-        idx = findall(vec(.!any(isnan.(X), dims=1)))
-        X = X[:,idx] # view(X,:,idx)
-
-        xp = p * log.(lags)
+        # explanatory and observation vectors
+        xp = pow * log.(lags)
         μX = mean(X, dims=2)
-        yp = vec(log.(mean((abs.(X.-μX)).^p, dims=2)))
-
-        hurst, η = NaN, NaN
+        yp = vec(log.(mean((abs.(X.-μX)).^pow, dims=2)))
+        # yp = vec(log.(mean((abs.(X)).^pow, dims=2)))
+        # hurst, η, res, err = NaN, NaN, NaN, (NaN, NaN)
 
         # old version with weights
         # # polynomial order of the weight for samples, if 0 the uniform weight is used
@@ -426,11 +440,30 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
         # func = h -> 1/2 * sum(ws .* (yc - h*xc).^2)
         # # func = h -> 1/2 * sum(ws .* abs.(yc - h*xc))
 
+        # compute the weighting vector:
+        # Run first an estimation of Hurst by linear regression, then use this estimate to compute the weighting vector.
+        dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
+        opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
+        η, hurst = GLM.coef(opm)  # intercept and slope
+        res = GLM.deviance(opm)  # residual
+        # err = try  # std error of estimates
+        #     GLM.stderror(opm)
+        # catch
+        #     (NaN, NaN)
+        # end
+
+        ws =  variogram_variance(0 < hurst < 1 ? hurst : 0.5, lags, size(X,2)) .^ -1
+        # ws =  variogram_variance(0.5, lags, size(X,2)) .^ -1  # in practice this is good enough?
+        # ws = ones(length(lags))  # uniform weight
+        # ws ./= sum(ws)
+
         # estimation of H and η
-        if method==:optim
+
+        if method == :optim
             yc = yp .- mean(yp)
             xc = xp .- mean(xp)
-            func = h -> 1/2 * sum((yc - h*xc).^2)
+            func = h -> sum(ws .* (yc - h*xc).^2)
+            # func = h -> sum(ws .* abs.(yc - h*xc).^qnorm)
             # Gradient-free constrained optimization
             ɛ = 1e-2  # search hurst in the interval [ɛ, 1-ɛ]
             opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
@@ -439,10 +472,16 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
             # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
             hurst = Optim.minimizer(opm)[1]
             η = mean(yp - hurst*xp)
-        elseif method==:lm  # using GLM package
+            # relative residual
+            res = sqrt(opm.minimum / length(xp) / var(yp))
+        elseif method == :lm  # using GLM package
             dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
-            opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
+            opm = GLM.glm(@GLM.formula(yvar~xvar), dg, GLM.Normal(), GLM.IdentityLink(), wts=sqrt.(ws))
+            # opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
             η, hurst = GLM.coef(opm)
+            # GLM.deviance is by definition the RSS
+            res = sqrt(GLM.deviance(opm) / length(xp) / var(yp))
+
             # # or equivalently, by manual inversion
             # Ap = hcat(xp, ones(length(xp))) # design matrix
             # hurst, η = Ap \ yp
@@ -450,11 +489,11 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
             error("Unknown method $(method).")
         end
 
-        cp = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)  # constant depending on p
-        σ = exp((η-log(cp))/p)
+        cp = normal_moment_factor(pow)  # constant factor depending on p
+        σ = (0.05 < hurst < 0.95) ? exp((η-log(cp))/pow) : NaN
 
         # return hurst, σ, (xp, yp)
-        return (hurst=hurst, σ=σ, vars=(xp,yp), optimizer=opm)
+        return (hurst=hurst, σ=σ, η=η, residual=res, vars=(xp,yp), optimizer=opm)
     end
 end
 
@@ -466,75 +505,180 @@ end
 - X: sample path of fBm, e.g. the log-price
 - lags: time lags used to compute finite differences
 """
-function powlaw_estim(X::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}; kwargs...)
-    dX = transpose(lagdiff(X, lags, :causal))  # take transpose s.t. each column is an observation
+function powlaw_estim(X::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}; mode::Symbol=:causal, kwargs...)
+    dX = transpose(lagdiff(X, lags; mode=mode))  # take transpose s.t. each column is an observation
     return powlaw_estim(dX, lags; kwargs...)
 end
 
 
-####### Generalized scalogram #######
+"""
+# Args
+- estimator: function of estimator having the interface `estimator(X, p, args...; kwargs...)`. Here `X` is the input array, `p` is the power of moment.
+"""
+function multifractal_estim(estimator::Function, X::AbstractArray, pows::AbstractVector{<:Real}, args...; kwargs...)
+    @assert all(pows .> 0) "Powers of moment must be positive"
+
+    res = [estimator(X, p, args...; kwargs...) for p in pows]
+    ws = StatsBase.weights([x.residual for x in res].^ -1)
+    Hs = [x.hurst for x in res]
+    σs = [x.σ for x in res]
+    Rs = [x.residual for x in res]
+
+    # return (hurst=mean(Hs, ws), σ=mean(σs, ws), residual=mean(Rs, ws))
+    # return (hurst=median(Hs, ws), σ=median(σs, ws), residual=median(Rs, ws))
+    return (hurst=median(Hs), σ=median(σs), residual=median(Rs))
+end
+
+const variogram_estim = powlaw_estim
+
+
+####### Scalogram estimator #######
 
 """
+Variance function of the empirical scalogram of B-Spline wavelet
+"""
+function bspline_scalogram_variance(H::Real, vm::Integer, sclrng::AbstractVector{<:Integer}, N::Integer)
+    V = zeros(Float64, length(sclrng))
+
+    for (j, s) in enumerate(sclrng)
+        # B-Spline filter: extra 1/sqrt(s) factor is due to the implementation of DCWT
+        filter = intscale_bspline_filter(s, vm)/sqrt(s)
+        proc = FractionalWaveletNoise(H, filter)
+        V[j] = autocov(proc, 0)^2 + sum((1-i/N) * autocov(proc, i)^2 for i=0:N-1)
+    end
+    return 4/N * V
+end
+
+
+"""
+
 B-Spline scalogram estimator for Hurst exponent and volatility.
 
 # Args
-- S: vector of scalogram of moment `p`, e.g., when `p=2` it is the variance of the wavelet coefficients per scale.
-- sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one row in the matrix X
+- X: matrix of wavelet coefficients. Each row corresponds to a scale.
+- sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one row in the matrix X.
 - v: vanishing moments of the wavelet
 - p: power of the scalogram
 """
-function bspline_scalogram_estim(S::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, v::Integer; p::Real=2.; kwargs...)
-    @assert length(S) == length(sclrng) && any(S .> 0)
-    @assert any(sclrng .% 2 .== 0) && any(sclrng .> 0)  # all scales must be positive even number
+function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, vm::Integer; pow::Real=2., method::Symbol=:optim)
+    # remove columns containing NaN
+    idx = findall(vec(.!any(isnan.(X), dims=1)))
+    X = X[:,idx] # view(X,:,idx)
 
-    xp = log.(sclrng.^p)
-    yp = log.(S)
+    if length(X) == 0
+        return (hurst=NaN, σ=NaN, vars=nothing, optimizer=nothing)
+    else
+        @assert length(sclrng) == size(X,1) > 1  "Dimension mismatch."
+        @assert any(sclrng .% 2 .== 0) && any(sclrng .> 0)  "All scales must be positive even number."
+        @assert pow>0  "Moment must be positive."
 
-    # res = IRLS(log.(S), p*log.(sclrng), p)
-    # hurst::Float64 = res[1][1]-1/2
-    # β::Float64 = res[1][2][1]  # returned value is a scalar in a vector form
-    # ols::Float64 = NaN
+        xp = pow * log.(sclrng)
+        μX = mean(X, dims=2)
+        yp = vec(log.(mean(abs.(X.-μX).^pow, dims=2)))
+        # hurst, η, res = NaN, NaN, NaN
 
-    # estimation of H and η
-    if method==:optim
-        yc = yp .- mean(yp)
-        xc = xp .- mean(xp)
-        func = h -> 1/2 * sum((yc - h*xc).^2)
-        # Gradient-free constrained optimization
-        ɛ = 1e-2  # search hurst in the interval [ɛ, 1-ɛ]
-        opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
-        hurst = Optim.minimizer(opm)[1] - 1/2
-        η = mean(yp - (hurst+1/2)*xp)
-    elseif method==:lm  # using GLM package
+        # compute the weighting vector:
+        # Run first an estimation of Hurst by linear regression, then use this estimate to compute the weighting vector.
         dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
         opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
         coef = GLM.coef(opm)
-        η = coef[1]
-        hurst = coef[2] - 1/2
-    else
-        error("Unknown method $(method).")
+        η, hurst = coef[1], coef[2] - 1/2  # intercept and slope
+        res = GLM.deviance(opm)  # residual
+        ws =  bspline_scalogram_variance(0 < hurst < 1 ? hurst : 0.5, vm, sclrng, size(X,2)) .^ -1
+        # ws ./= sum(ws)
+
+        # estimation of H and η
+        if method == :optim
+            yc = yp .- mean(yp)
+            xc = xp .- mean(xp)
+
+            # original implentation
+            # func = h -> sum(ws .* abs.(yc - h*xc).^1)
+            func = h -> sum(ws .* (yc - h*xc).^2)
+            # Gradient-free constrained optimization
+            ɛ = 1e-2  # search hurst in the interval 0.5+[ɛ, 1-ɛ]
+            opm = Optim.optimize(func, 0.5+ε, 1.5-ε, Optim.Brent())
+            hurst = Optim.minimizer(opm)[1] - 1/2
+            η = mean(yp - (hurst+1/2)*xp)
+
+            # # implementation of Knut with weight
+            # ɛ = 1e-2  # search hurst in the interval 0.5+[ɛ, 1-ɛ]
+            # wv1 = 1 ./ (sclrng)
+            # func = h -> sum(wv1 .* abs.(yc - h*xc).^2)
+            # # func = h -> sum(wv1 .* (yc - h*xc).^2)
+            # opm = Optim.optimize(func, 0.5+ε, 1.5-ε, Optim.Brent())
+            # hurst1 = Optim.minimizer(opm)[1] - 1/2
+            # wv2 = 1 ./ (sclrng .^ 3)
+            # func = h -> sum(wv2 .* abs.(yc - h*xc).^2)
+            # # func = h -> sum(wv2 .* (yc - h*xc).^2)
+            # opm = Optim.optimize(func, 0.5+ε, 1.5-ε, Optim.Brent())
+            # hurst2 = Optim.minimizer(opm)[1] - 1/2
+            # hurst = max(hurst1, hurst2)
+            # # println("Hurst1=$(hurst1), Hurst2=$(hurst2)")
+            # η = mean(yp - (hurst+1/2)*xp)
+
+            res = sqrt(opm.minimum / length(xp) / var(yp))
+        elseif method == :lm  # using GLM package
+            dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
+            opm = GLM.glm(@GLM.formula(yvar~xvar), dg, GLM.Normal(), GLM.IdentityLink(), wts=sqrt.(ws))
+            # opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
+            coef = GLM.coef(opm)
+            η, hurst = coef[1], coef[2] - 1/2
+            res = sqrt(GLM.deviance(opm) / length(xp) / var(yp))
+
+        # elseif method == :irls
+        #     coef = IRLS(yp, xp, p; maxiter=10^4, tol=10^-4)
+        #     hurst = coef[1][1]-1/2
+        #     η = coef[2][1]  # returned value is a scalar in a vector form
+        #     opm = nothing
+        else
+            error("Unknown method $(method).")
+        end
+
+        cp = normal_moment_factor(pow)  # constant factor depending on p
+        σ = if 0.05 < hurst < 0.95
+            try
+                A = Aψρ_bspline(0, 1, hurst, vm, :center)  # kwargs: mode=:center
+                exp((η - log(cp) - log(A)*pow/2)/pow)
+            catch
+                NaN
+            end
+        else
+            NaN
+        end
+
+        return (hurst=hurst, σ=σ, η=η, residual=res, vars=(xp,yp), optimizer=opm)
     end
-
-    cp = 2^(p/2) * gamma((p+1)/2)/sqrt(pi)
-    σ = try
-        A = Aρ_bspline(0, 1, hurst, v, kwargs...)  # kwargs: mode=:center
-        @assert A>0
-        exp((η - log(cp) - log(abs(Aρ))*p/2)/p)
-    catch
-        NaN
-    end
-
-    return (hurst=hurst, σ=σ, vars=(xp,yp), optimizer=opm)
-
-    # Ar = hcat(xr, ones(length(xr)))  # design matrix
-    # H0, η = Ar \ yr  # estimation of H and β
-    # hurst = H0-1/2
-    # A = Aρ_bspline(0, r, hurst, v, mode)
-    # σ = exp((η - log(abs(A)))/2)
-    # return hurst, σ
 end
 
-const fBm_bspline_scalogram_estim = bspline_scalogram_estim
+
+"""
+# Args
+- X: sample path of fBm, e.g. the log-price
+- v: vanishing moments
+"""
+function bspline_scalogram_estim(X::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, vm::Integer; kwargs...)
+
+    # B-Spline wavelet transform
+    W, M = cwt_bspline(X, sclrng, vm, :causal)
+    # Wt = [view(W, findall(M[:,n]),n) for n=1:size(W,2)]
+    # truncation of boundary points
+    t1 = findall(prod(M, dims=2))[1][1]
+    t2 = findall(prod(M, dims=2))[end][1]
+    Wt = W[t1:t2, :]
+
+    # # Covariance matrix
+    # lag = 0
+    # Σ = cov(Wt[1:end-lag, :], Wt[lag+1:end,:], dims=1);
+
+    return bspline_scalogram_estim(Wt', sclrng, v; kwargs...)
+end
+
+
+# function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, v::Integer, pows::AbstractVector{<:Real}; kwargs...)
+
+#     bspline_scalogram_estim()
+# end
 
 
 # """

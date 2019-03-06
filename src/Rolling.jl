@@ -4,17 +4,17 @@
 Apply a function on a rolling window with truncation at boundaries.
 
 # Args
-- func: function to be applied, taking vector or matrix as input
-- X: input data, vector or matrix.  For matrix the rolling window runs through the row direction (i.e. horizontally, each column corresponds to an observation). The time arrow is from small to large index.
+- func: function to be applied
+- X: input array. The rolling window is applied on the last dimension from small to large index (time arrow). For example, on a vector it runs through the column direction (i.e. vertically), while on a matrix it runs through the row direction (i.e. horizontally, and each column corresponds to an observation).
 - w: number of samples on the rolling window
 - d: downsampling factor on the rolling window
 - p: step of the rolling window
 
 # Kwargs
 - mode: :causal or :anticausal
-- boundary: truncation, :hard or :soft
+- boundary: truncation of boundary, :hard or :soft
 """
-function rolling_apply(func::Function, X::AbstractVecOrMat, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal, boundary::Symbol=:hard)
+function rolling_apply(func::Function, X::AbstractArray, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal, boundary::Symbol=:hard)
     return if boundary == :hard
         rolling_apply_hard(func, X, w, d, p; mode=mode)
     elseif boundary == :soft
@@ -29,7 +29,7 @@ end
 # Notes
 The result is empty if `d*(w-1)+1 > L`
 """
-function rolling_apply_hard(func::Function, X::AbstractVecOrMat, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal)
+function rolling_apply_hard(func::Function, X::AbstractArray, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal)
     @assert w>=1 && d>=1 && p>=1
 
     L = size(X)[end]  # number of samples in X
@@ -38,22 +38,26 @@ function rolling_apply_hard(func::Function, X::AbstractVecOrMat, w::Integer, d::
         gs = t -> reverse(t:-d:(t-d*(w-1)))  # grid of samples, ending by t
         for t=L:-p:(1+d*(w-1))
             # V = ndims(X) == 1 ? reverse(view(X,t:-d:t-d*w+1)) : reverse(view(X,:,t:-d:t-d*w+1),dims=2)  # old version, WRONG
-            V = ndims(X) == 1 ? view(X,gs(t)) : view(X,:,gs(t))
-            pushfirst!(res, (t, func(V)))
+            # correct version:
+            # V = ndims(X) == 1 ? view(X,gs(t)) : view(X,:,gs(t))
+            # pushfirst!(res, (t, func(V)))
+            pushfirst!(res, (t, func(selectdim(X, ndims(X), gs(t)))))
         end
     else  # anti-causal
         gs = t -> t:d:(t+d*(w-1))  # grid of samples, starting by t
         for t=1:p:(L-d*(w-1))
             # V = ndims(X) == 1 ? view(X,t:d:t+d*w-1) : view(X,:,t:d:t+d*w-1)  # old version, WRONG
-            V = ndims(X) == 1 ? view(X,gs(t)) : view(X,:,gs(t))
-            push!(res, (t, func(V)))
+            # correct version
+            # V = ndims(X) == 1 ? view(X,gs(t)) : view(X,:,gs(t))
+            # push!(res, (t, func(V)))
+            push!(res, (t, func(selectdim(X, ndims(X), gs(t)))))
         end
     end
     return res
 end
 
 
-function rolling_apply_soft(func::Function, X::AbstractVecOrMat, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal)
+function rolling_apply_soft(func::Function, X::AbstractArray, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal)
     @assert w>=1 && d>=1 && p>=1
 
     L = size(X)[end]  # number of samples in X
@@ -61,39 +65,16 @@ function rolling_apply_soft(func::Function, X::AbstractVecOrMat, w::Integer, d::
     if mode==:causal
         gs = t -> reverse(t:-d:max(1,t-d*(w-1)))  # grid of samples, ending by t
         for t=L:-p:1
-            # V = ndims(X) == 1 ? reverse(view(X,t:-d:t-d*w+1)) : reverse(view(X,:,t:-d:t-d*w+1),dims=2)  # old version, WRONG
-            V = ndims(X) == 1 ? view(X,gs(t)) : view(X,:,gs(t))
-            pushfirst!(res, (t, func(V)))
+            pushfirst!(res, (t, func(selectdim(X, ndims(X), gs(t)))))
         end
     else  # anti-causal
         gs = t -> t:d:min(L,t+d*(w-1))  # grid of samples, starting by t
         for t=1:p:L
-            # V = ndims(X) == 1 ? view(X,t:d:t+d*w-1) : view(X,:,t:d:t+d*w-1)  # old version, WRONG
-            V = ndims(X) == 1 ? view(X,gs(t)) : view(X,:,gs(t))
-            push!(res, (t, func(V)))
+            push!(res, (t, func(selectdim(X, ndims(X), gs(t)))))
         end
     end
     return res
 end
-
-
-# function rolling_apply_soft(func::Function, X::AbstractVecOrMat, w::Integer, d::Integer=1, p::Integer=1; mode::Symbol=:causal)
-#     # @assert w>0
-#     L = size(X)[end]  # number of samples in X
-#     res = []
-#     if mode==:causal
-#         for t=L:-p:1
-#             V = ndims(X) == 1 ? reverse(view(X,t:-d:max(1,t-d*w+1))) : reverse(view(X,:,t:-d:max(1,t-d*w+1)),dims=2)
-#             pushfirst!(res, (t, func(V)))
-#         end
-#     else  # anti-causal
-#         for t=1:p:L
-#             V = ndims(X) == 1 ? view(X,t:d:min(L,t+d*w-1)) : view(X,:,t:d:min(L,t+d*w-1))
-#             push!(res, (t, func(V)))
-#         end
-#     end
-#     return res
-# end
 
 
 """
@@ -102,7 +83,7 @@ Rolling vectorization.
 Vectorize the contents of a rolling window and make horizontal concatenation.
 
 # Args
-- X: input vector or matrix. The window rolls in the last dimension from small to large index.
+- X: input array. The window rolls in the last dimension from small to large index.
 - w: size of rolling window, or number of consecutive samples to be concatenated together
 - d: downsampling factor
 - p: period
@@ -113,7 +94,7 @@ A named tuple `(index, value)` which are
 - index of `X` where the rolling window starts (mode=:anticausal) or ends (mode=:causal, default)
 - output matrix that row dimension equals to `w` if parameters are valid, otherwise it is an empty matrix.
 """
-function rolling_vectorize(X::AbstractVecOrMat{T}, w::Integer, d::Integer=1, p::Integer=1; kwargs...) where {T<:Number}
+function rolling_vectorize(X::AbstractArray{T}, w::Integer, d::Integer=1, p::Integer=1; kwargs...) where {T}
     # res = rolling_apply_hard(x->vec(hcat(x...)), X, w, 1, p; kwargs...)
     # res = rolling_apply_hard(x->vec(x), X, w, 1, p; kwargs...)
     res = rolling_apply_hard(x->vec(x), X, w, d, p; kwargs...)
@@ -147,7 +128,7 @@ function rolling_median(X::AbstractVecOrMat{<:Number}, w::Integer, d::Integer=1,
 end
 
 
-######## Rolling estimators ########
+######## Below is not maintained ########
 
 """
 Make rolling orders based on fGn-MLE.

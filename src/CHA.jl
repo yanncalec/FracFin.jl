@@ -502,7 +502,7 @@ Evaluate the wavelet function at integer scales by looking-up table.
 # Note
 For accuracy, increase the density of grid for pre-evaluation of ψ.
 """
-function _intscale_wavelet_filter(k::Integer, ψ::AbstractVector{<:Real}, Sψ::Tuple{Real,Real}, v::Integer=0)
+function intscale_wavelet_filter(k::Integer, ψ::AbstractVector{<:Real}, Sψ::Tuple{Real,Real}, v::Integer=0)
     # @assert k > 0
     # @assert Sψ[2] > Sψ[1]
 
@@ -528,7 +528,7 @@ end
 """
 Evaluate the wavelet function at integer scales.
 """
-function _intscale_wavelet_filter(k::Integer, ψ::Function, Sψ::Tuple{Real,Real}, v::Integer=0)
+function intscale_wavelet_filter(k::Integer, ψ::Function, Sψ::Tuple{Real,Real}, v::Integer=0)
     # @assert k > 0
     # @assert Sψ[2] > Sψ[1]
 
@@ -550,7 +550,7 @@ Integer (even) scale Haar filter.
 
 The original Haar wavelet takes value 1 on [0,1/2) and -1 on [1/2, 1) and 0 elsewhere.
 """
-function _intscale_haar_filter(scl::Integer)
+function intscale_haar_filter(scl::Integer)
     @assert scl > 0 && iseven(scl)
 
     k::Int = div(scl,2)
@@ -560,15 +560,15 @@ end
 
 mexhat(t::Real) = -exp(-t^2) * (4t^2-2t) / (2*sqrt(2π))
 
-function _intscale_mexhat_filter(k::Integer)
-    return _intscale_wavelet_filter(k, mexhat, (-5.,5.), 2)  # Mexhat has two vanishing moments
+function intscale_mexhat_filter(k::Integer)
+    return intscale_wavelet_filter(k, mexhat, (-5.,5.), 2)  # Mexhat has two vanishing moments
 end
 
 """
 Continous Mexican hat transform
 """
 function cwt_mexhat(x::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, mode::Symbol=:center)
-    return cwt_quad(x, _intscale_mexhat_filter, sclrng, mode)
+    return cwt_quad(x, intscale_mexhat_filter, sclrng, mode)
 end
 
 
@@ -585,15 +585,15 @@ end
 
 
 """
-    _intscale_bspline_filter(scl::Int, v::Int)
+    intscale_bspline_filter(scl::Int, v::Int)
 
 Integer (even) scale B-Spline filter, which is defined as the auto-convolution of Haar filter.
 
 # Notes
-- The true scale is `2k`, like in `_intscale_haar_filter`.
+- The true scale is `2k`, like in `intscale_haar_filter`.
 - A trick can be used to improve the scaling law at fine scales, but this corrupts the intercept with a unknown factor in the linear regression.
 """
-function _intscale_bspline_filter(scl::Integer, v::Integer)
+function intscale_bspline_filter(scl::Integer, v::Integer)
     @assert scl > 0 && iseven(scl)
     @assert v>0
 
@@ -612,7 +612,7 @@ Continous Haar transform.
 function cwt_haar(x::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, mode::Symbol)
     all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
 
-    return cwt_quad(x, _intscale_haar_filter, sclrng, mode)
+    return cwt_quad(x, intscale_haar_filter, sclrng, mode)
 end
 
 
@@ -632,8 +632,8 @@ Continous B-Spline transform at integer (even) scales.
 function cwt_bspline(x::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, v::Integer, mode::Symbol)
     all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
 
-    # bsfilter = k->normalize(_intscale_bspline_filter(k, v))
-    bsfilter = k->_intscale_bspline_filter(k, v)
+    # bsfilter = k->normalize(intscale_bspline_filter(k, v))
+    bsfilter = k->intscale_bspline_filter(k, v)
     return cwt_quad(x, bsfilter, sclrng, mode)
 end
 
@@ -670,7 +670,7 @@ maxscale_bspline(N::Integer, v::Integer) = floor(Int, (N+1)/v/2)
 The integrand function of C^ψ_ρ(τ, H) with a centered B-spline wavelet.
 """
 function Cψρ_bspline_integrand_center(τ::Real, ω::Real, ρ::Real, H::Real, v::Integer)
-    return 1/(16^v * 2π) * (ω^2)^(v-(H+1/2)) * (sinc(ω*√ρ/4π)*sinc(ω/√ρ/4π))^(2v) * cos(ω*τ)
+    return 1/(16^v * π) * (ω^2)^(v-(H+1/2)) * (sinc(ω*√ρ/4π)*sinc(ω/√ρ/4π))^(2v) * cos(ω*τ)
 end
 
 
@@ -705,48 +705,47 @@ end
 
 
 """
-Evaluate the function C^ψ_ρ(τ,H) by numerical integration.
+Evaluate the function `C^ψ_ρ(τ,H)` by numerical integration.
 """
-function Cψρ_bspline(τ::Real, ρ::Real, H::Real, v::Integer, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
+function Cψρ_bspline(τ::Real, ρ::Real, H::Real, v::Integer, mode::Symbol)
     @assert ρ>0
     @assert 1>H>0
-    @assert v>H+1/2  # otherwise may raise `DomainError with 0.0`
 
     f = ω -> Cψρ_bspline_integrand(τ, ω, ρ, H, v, mode)
-    # println("τ=$τ, ρ=$ρ, H=$H, v=$v") #
-    return QuadGK.quadgk(f, rng...)[1]
-    # return 1e-4 * sum(f.(rng[1]:1e-4:rng[2]))
+
+    # quadgk cannot handle the case v<=H+1/2: it may raise `DomainError with 0.0`
+    return QuadGK.quadgk(f, (v>H+1/2) ? 0 : 1e-8, 50)[1]
 end
 
 
-"""
-Derivative w.r.t. H
-"""
-function diff_Cψρ_bspline(τ::Real, ρ::Real, H::Real, v::Integer, mode::Symbol; rng::Tuple{Real, Real}=(-50, 50))
-    f = ω -> ((ω==0) ? 0 : (-log(ω^2) * Cψρ_bspline_integrand(τ, ω, ρ, H, v, mode)))
-    return QuadGK.quadgk(f, rng...)[1]
-end
+# """
+# Derivative w.r.t. H
+# """
+# function diff_Cψρ_bspline(τ::Real, ρ::Real, H::Real, v::Integer, mode::Symbol; rng::Tuple{Real, Real}=(0, 50))
+#     f = ω -> ((ω==0) ? 0 : (-log(ω^2) * Cψρ_bspline_integrand(τ, ω, ρ, H, v, mode)))
+#     return QuadGK.quadgk(f, rng...)[1]
+# end
 
 
 """
-Evaluate A_ρ(τ, H)
+Evaluate the function `A^ψ_ρ(τ, H)`
 
 # Args
 - τ, ρ, H: see definition
 - v: vanishing moments of the wavelet ψ
 - mode: {:left, :center, :right} for causal, centered, anti-causal ψ
 """
-Aρ_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol) = gamma(2H+1) * sin(π*H) * Cψρ_bspline(τ, ρ, H, v, mode)
+Aψρ_bspline(τ::Real, ρ::Real, H::Real, v::Int, mode::Symbol) = gamma(2H+1) * sin(π*H) * Cψρ_bspline(τ, ρ, H, v, mode)
 
 """
-Evaluate the matrix of `A_ρ(H, τ)` for varing ρ with the B-Spline wavelet.
+Evaluate the matrix of `A^ψ_ρ(H, τ)` for varing ρ with the B-Spline wavelet.
 
 # Notes
-- The true scale is two times the scale index due to the special implementation of B-Spline wavelet, see also `_intscale_bspline_filter()`.
+- The true scale is two times the scale index due to the special implementation of B-Spline wavelet, see also `intscale_bspline_filter()`.
 - Consider parallelization.
 """
 function Amat_bspline(H::Real, v::Integer, lag::Real, sclrng::AbstractVector{<:Integer}, mode::Symbol)
     # all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
-    return [Aρ_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
+    return [Aψρ_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
     # return gamma(2H+1) * sin(π*H) * [Cψρ_bspline(lag/sqrt(i*j), j/i, H, v, mode) for i in sclrng, j in sclrng]
 end
