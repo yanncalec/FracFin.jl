@@ -132,7 +132,7 @@ function fWn_MLE_estim(X0::AbstractVecOrMat{<:Real}, ψ::AbstractVector{<:Real},
         return (hurst=NaN, σ=NaN, loglikelihood=NaN, optimizer=nothing)
     else
         # forcing zero-mean condition
-        # X = (ndims(X0) == 1) ? X0 : X0 .- mean(X0, dims=2)        
+        # X = (ndims(X0) == 1) ? X0 : X0 .- mean(X0, dims=2)
         X = X0
 
         @assert length(G) == size(X,1)  "Mismatched dimension."
@@ -176,6 +176,7 @@ function fWn_MLE_estim(X0::AbstractVecOrMat{<:Real}, ψ::AbstractVector{<:Real},
         # # or equivalently
         # L = log_likelihood(σ^2*Σ, X)
 
+        L /= length(X)  # normalization
         return (hurst=hurst, σ=σ, loglikelihood=L, optimizer=opm)
     end
 end
@@ -200,8 +201,8 @@ The rolling vectorization returns
 """
 function fWn_MLE_estim(X::AbstractVector{<:Real}, ψ::AbstractVector{<:Real}, s::Integer, u::Integer, l::Integer; kwargs...)
     t, V = rolling_vectorize(X, s, u, l; mode=:causal)
-    
-    fWn_MLE_estim(V, ψ, u*(0:size(V,1)-1); kwargs...)    
+
+    fWn_MLE_estim(V, ψ, u*(0:size(V,1)-1); kwargs...)
 end
 
 
@@ -299,7 +300,7 @@ Maximum likelihood estimation of Hurst exponent and volatility for fWn bank.
 # Notes
 - The fWnb process is multivariate. An observation at time `t` is a `d`-dimensional vector, where `d` equals to the number of filters used in fWnb. A vector `X` is the concatenation of observations made on some time grid `G`, while a matrix `X` is a collection of i.i.d. sample vectors. Hence the row dimension of `X` must be `length(F) * length(G)`, if `G` is ever provided.
 """
-function fWn_MLE_estim(X::AbstractVecOrMat{<:Real}, F::AbstractVector{<:AbstractVector{<:Real}}, G::AbstractVector{<:Integer}=Int[]; method::Symbol=:optim, ε::Real=1e-2)
+function fWn_MLE_estim(X::AbstractVecOrMat{<:Real}, F::AbstractVector{<:AbstractVector{<:Real}}, G::AbstractVector{<:Integer}=Int[]; method::Symbol=:optim)
     # @assert 0. < ε < 1.
 
     if length(X) == 0  # for empty input
@@ -315,10 +316,11 @@ function fWn_MLE_estim(X::AbstractVecOrMat{<:Real}, F::AbstractVector{<:Abstract
         func = h -> -fWn_log_likelihood_H(X, h, F, G)
         opm = nothing
         hurst = nothing
+        ε::Real=1e-2  # search Hurst in [ɛ, 1-ɛ]
 
         if method == :optim
             # Gradient-free constrained optimization
-            opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+            opm = Optim.optimize(func, ɛ, 1-ɛ, Optim.Brent())
             # # Gradient-based optimization
             # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
             # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
@@ -372,6 +374,27 @@ end
 ###### variogram estimator ######
 
 """
+Multifractal estimator.
+
+# Args
+- estimator: function of estimator having the interface `estimator(X, p, args...; kwargs...)`. Here `X` is the input array, `p` is the power of moment.
+"""
+function multifractal_estim(estimator::Function, X::AbstractArray, pows::AbstractVector{<:Real}, args...; kwargs...)
+    @assert all(pows .> 0) "Powers of moment must be positive"
+
+    res = [estimator(X, p, args...; kwargs...) for p in pows]
+    ws = StatsBase.weights([x.residual for x in res].^ -1)
+    Hs = [x.hurst for x in res]
+    σs = [x.σ for x in res]
+    Rs = [x.residual for x in res]
+
+    # return (hurst=mean(Hs, ws), σ=mean(σs, ws), residual=mean(Rs, ws))
+    # return (hurst=median(Hs, ws), σ=median(σs, ws), residual=median(Rs, ws))
+    return (hurst=median(Hs), σ=median(σs), residual=median(Rs))
+end
+
+
+"""
 Variance function of the empirical variogram
 """
 function variogram_variance(H::Real, lags::AbstractVector{<:Integer}, N::Integer)
@@ -415,7 +438,7 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
     X = X[:,idx] # view(X,:,idx)
 
     if length(X) == 0
-        return (hurst=NaN, σ=NaN, vars=nothing, optimizer=nothing)
+        return (hurst=NaN, σ=NaN, η=NaN, residual=NaN, vars=nothing, optimizer=nothing)
     else
         @assert length(lags) == size(X,1) > 1  "Dimension mismatch."
         @assert all(lags .>= 1)  "Lags must be larger than or equal to 1."
@@ -469,8 +492,8 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
             func = h -> sum(ws .* (yc - h*xc).^2)
             # func = h -> sum(ws .* abs.(yc - h*xc).^qnorm)
             # Gradient-free constrained optimization
-            ɛ = 1e-2  # search hurst in the interval [ɛ, 1-ɛ]
-            opm = Optim.optimize(func, ε, 1-ε, Optim.Brent())
+            # ɛ = 1e-2  # search hurst in the interval [ɛ, 1-ɛ]
+            opm = Optim.optimize(func, 0., 1., Optim.Brent())
             # # Gradient-based optimization
             # optimizer = Optim.GradientDescent()  # e.g. Optim.BFGS(), Optim.GradientDescent()
             # opm = Optim.optimize(func, ε, 1-ε, [0.5], Optim.Fminbox(optimizer))
@@ -494,7 +517,7 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
         end
 
         cp = normal_moment_factor(pow)  # constant factor depending on p
-        σ = (0.05 < hurst < 0.95) ? exp((η-log(cp))/pow) : NaN
+        σ = exp((η-log(cp))/pow)
 
         # return hurst, σ, (xp, yp)
         return (hurst=hurst, σ=σ, η=η, residual=res, vars=(xp,yp), optimizer=opm)
@@ -512,25 +535,6 @@ end
 function powlaw_estim(X::AbstractVector{<:Real}, lags::AbstractVector{<:Integer}; mode::Symbol=:causal, kwargs...)
     dX = transpose(lagdiff(X, lags; mode=mode))  # take transpose s.t. each column is an observation
     return powlaw_estim(dX, lags; kwargs...)
-end
-
-
-"""
-# Args
-- estimator: function of estimator having the interface `estimator(X, p, args...; kwargs...)`. Here `X` is the input array, `p` is the power of moment.
-"""
-function multifractal_estim(estimator::Function, X::AbstractArray, pows::AbstractVector{<:Real}, args...; kwargs...)
-    @assert all(pows .> 0) "Powers of moment must be positive"
-
-    res = [estimator(X, p, args...; kwargs...) for p in pows]
-    ws = StatsBase.weights([x.residual for x in res].^ -1)
-    Hs = [x.hurst for x in res]
-    σs = [x.σ for x in res]
-    Rs = [x.residual for x in res]
-
-    # return (hurst=mean(Hs, ws), σ=mean(σs, ws), residual=mean(Rs, ws))
-    # return (hurst=median(Hs, ws), σ=median(σs, ws), residual=median(Rs, ws))
-    return (hurst=median(Hs), σ=median(σs), residual=median(Rs))
 end
 
 const variogram_estim = powlaw_estim
@@ -564,13 +568,13 @@ B-Spline scalogram estimator for Hurst exponent and volatility.
 - v: vanishing moments of the wavelet
 - p: power of the scalogram
 """
-function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, vm::Integer; pow::Real=2., method::Symbol=:optim)
+function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, vm::Integer; pow::Real=2., method::Symbol=:optim, cmode::Symbol=:causal)
     # remove columns containing NaN
     idx = findall(vec(.!any(isnan.(X), dims=1)))
     X = X[:,idx] # view(X,:,idx)
 
     if length(X) == 0
-        return (hurst=NaN, σ=NaN, vars=nothing, optimizer=nothing)
+        return (hurst=NaN, σ=NaN, η=NaN, residual=NaN, vars=nothing, optimizer=nothing)
     else
         @assert length(sclrng) == size(X,1) > 1  "Dimension mismatch."
         @assert any(sclrng .% 2 .== 0) && any(sclrng .> 0)  "All scales must be positive even number."
@@ -601,7 +605,7 @@ function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVect
             func = h -> sum(ws .* (yc - h*xc).^2)
             # Gradient-free constrained optimization
             ɛ = 1e-2  # search hurst in the interval 0.5+[ɛ, 1-ɛ]
-            opm = Optim.optimize(func, 0.5+ε, 1.5-ε, Optim.Brent())
+            opm = Optim.optimize(func, 0.5+ɛ, 1.5-ɛ, Optim.Brent())
             hurst = Optim.minimizer(opm)[1] - 1/2
             η = mean(yp - (hurst+1/2)*xp)
 
@@ -640,14 +644,10 @@ function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVect
         end
 
         cp = normal_moment_factor(pow)  # constant factor depending on p
-        σ = if 0.05 < hurst < 0.95
-            try
-                A = Aψρ_bspline(0, 1, hurst, vm, :center)  # kwargs: mode=:center
-                exp((η - log(cp) - log(A)*pow/2)/pow)
-            catch
-                NaN
-            end
-        else
+        σ = try
+            A = Aψρ_bspline(0, 1, hurst, vm, cmode)  # kwargs: mode=:center
+            exp((η - log(cp) - log(A)*pow/2)/pow)
+        catch
             NaN
         end
 

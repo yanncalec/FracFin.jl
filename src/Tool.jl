@@ -429,3 +429,23 @@ function equalize_daynight(sdata::AbstractVector)
     end
     return edata
 end
+
+
+"""
+Compute the daily average of a timearray.
+"""
+function daily_average_timearray(X::TimeArray)
+    Xs = window_split_timearray(X, Dates.Day(1); ubase=Dates.Minute(1), fillmode=:o)
+
+    days = [Dates.Date(TimeSeries.timestamp(A)[1]) for A in Xs]
+    vals = zeros(length(Xs), size(X,2))
+
+    for (n,A) in enumerate(Xs)
+        v = TimeSeries.values(A)
+        # v[isnan.(v)] .= 0
+        vals[n,:] = mean(v, dims=1)
+    end
+
+    return TimeArray(days, vals, TimeSeries.colnames(X))
+end
+
