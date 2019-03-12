@@ -1,3 +1,4 @@
+########## Collections of some old functions (Not maintained and not exposed to main package) ##########
 
 #### fBm-MLE ####
 
@@ -155,3 +156,69 @@ function fGn_MLE_estim(X::AbstractVector{<:Real}, d::Integer, s::Integer, l::Int
     t, V = rolling_vectorize(X, s, 1, l; mode=:causal)
     return fGn_MLE_estim(V, d; kwargs...)
 end
+
+
+
+# function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, v::Integer, pows::AbstractVector{<:Real}; kwargs...)
+
+#     bspline_scalogram_estim()
+# end
+
+
+# """
+# B-Spline scalogram estimator with a matrix of DCWT coefficients as input. Each column in `W` is a vector of DCWT coefficients.
+# """
+# function fBm_bspline_scalogram_estim(W::AbstractMatrix{T}, sclrng::AbstractVector{Int}, v::Int; dims::Int=1, mode::Symbol=:center) where {T<:Real}
+#     return fBm_bspline_scalogram_estim(var(W,dims), sclrng, v; mode=mode)
+# end
+
+# """
+# B-Spline scalogram estimator with an array of DCWT coefficients as input. Each row in `W` corresponds to a scale.
+# """
+# function fBm_bspline_scalogram_estim(W::AbstractVector{T}, sclrng::AbstractVector{Int}, v::Int; mode::Symbol=:center) where {T<:AbstractVector{<:Real}}
+#     return fBm_bspline_scalogram_estim([var(w) for w in W], sclrng, v; mode=mode)
+# end
+
+
+"""
+Generalized B-Spline scalogram estimator for Hurst exponent and volatility.
+
+# Args
+- Σ: covariance matrix of wavelet coefficients.
+- sclrng: scale of wavelet transform. Each number in `sclrng` corresponds to one row in the matrix X
+- v: vanishing moments
+- r: rational ratio defining a line in the covariance matrix, e.g. r=1 corresponds to the main diagonal.
+"""
+function gen_bspline_scalogram_estim(Σ::AbstractMatrix{T}, sclrng::AbstractVector{Int}, v::Int, r::Rational=1//1; mode::Symbol=:center) where {T<:Real}
+    @assert issymmetric(Σ)
+    @assert size(Σ,1) == length(sclrng)
+    @assert r >= 1
+    if r > 1
+        all(diff(sclrng/sclrng[1]) .== 1) || error("Imcompatible scales: the ratio between the k-th and the 1st scale must be k")
+    end
+
+    p,q,N = r.num, r.den, length(sclrng)
+    @assert N>=2p
+
+    # Σ = cov(X, X, dims=2, corrected=true)  # covariance matrix
+
+    yr = [log(abs(Σ[q*j, p*j])) for j in 1:N if p*j<=N]
+    xr = [log(sclrng[q*j] * sclrng[p*j]) for j in 1:N if p*j<=N]
+
+    df = DataFrames.DataFrame(xvar=xr, yvar=yr)
+    ols = GLM.lm(@GLM.formula(yvar~xvar), df)
+    coef = GLM.coef(ols)
+
+    hurst = coef[2]-1/2
+    Aρ = Aρ_bspline(0, r, hurst, v, mode)
+    σ = exp((coef[1] - log(abs(Aρ)))/2)
+    return (hurst, σ), ols
+
+    # Ar = hcat(xr, ones(length(xr)))  # design matrix
+    # H0, η = Ar \ yr  # estimation of H and β
+    # hurst = H0-1/2
+    # Aρ = Aρ_bspline(0, r, hurst, v, mode)
+    # σ = ℯ^((η - log(abs(Aρ)))/2)
+    # return hurst, σ
+end
+# const fBm_gen_bspline_scalogram_estim = gen_bspline_scalogram_estim
