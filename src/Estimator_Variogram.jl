@@ -59,7 +59,7 @@ julia> X = transpose(lagdiff(W, lags, mode=:causal))
 ```
 - `p=1` is robust against quantization error.
 """
-function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}; pow::Real=2., method::Symbol=:lm)
+function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}; pow::Real=2., method::Symbol=:lm, reweight::Bool=true)
     # remove columns containing NaN
     idx = findall(vec(.!any(isnan.(X), dims=1)))
     X = X[:,idx] # view(X,:,idx)
@@ -96,6 +96,7 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
 
         # compute the weighting vector:
         # Run first an estimation of Hurst by linear regression, then use this estimate to compute the weighting vector.
+        # Note that the reweighting scheme is exact only for pow=2.
         dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
         opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
         η, hurst = GLM.coef(opm)  # intercept and slope
@@ -106,13 +107,15 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
         #     (NaN, NaN)
         # end
 
-        ws =  variogram_variance(0 < hurst < 1 ? hurst : 0.5, lags, size(X,2)) .^ -1
-        # ws =  variogram_variance(0.5, lags, size(X,2)) .^ -1  # in practice this is good enough?
-        # ws = ones(length(lags))  # uniform weight
-        # ws ./= sum(ws)
+        ws =  if reweight
+            variogram_variance(0 < hurst < 1 ? hurst : 0.5, lags, size(X,2)) .^ (-1)
+            # variogram_variance(0.5, lags, size(X,2)) .^ -1  # in practice this is good enough?
+        else
+            ones(length(lags))  # uniform weight
+        end
+        ws ./= sum(ws)
 
         # estimation of H and η
-
         if method == :optim
             yc = yp .- mean(yp)
             xc = xp .- mean(xp)
@@ -134,7 +137,7 @@ function powlaw_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}
             # opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
             η, hurst = GLM.coef(opm)
             # GLM.deviance is by definition the RSS
-            res = sqrt(GLM.deviance(opm) / length(xp) / var(yp))
+            res = sqrt(GLM.deviance(opm) / var(yp)) # / length(xp)
 
             # # or equivalently, by manual inversion
             # Ap = hcat(xp, ones(length(xp))) # design matrix

@@ -93,6 +93,11 @@ Vectorize the contents of a rolling window and make horizontal concatenation.
 A named tuple `(index, value)` which are
 - index of `X` where the rolling window starts (mode=:anticausal) or ends (mode=:causal, default)
 - output matrix that row dimension equals to `w` if parameters are valid, otherwise it is an empty matrix.
+
+# Notes
+When `d==1`, two special cases are
+- `w==1`: this function is equivalent to `reshape(X, :, size(X)[end])`
+- `w==size(X)[end]`: this function is equivalent to `reshape(X, :, 1)`
 """
 function rolling_vectorize(X::AbstractArray{T}, w::Integer, d::Integer=1, p::Integer=1; kwargs...) where {T}
     # res = rolling_apply_hard(x->vec(hcat(x...)), X, w, 1, p; kwargs...)

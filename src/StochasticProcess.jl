@@ -123,10 +123,12 @@ isstationary(X::StationaryProcess) = true
 Determine whether a grid has the constant step.
 """
 function isregulargrid(G::AbstractVector)
-    return if length(G) <= 2
+    return if 1 <= length(G) <= 2
         true
     elseif length(G) > 2  # second order difference should be close to 0
         isapprox(maximum(abs.(diff(diff(G)))), 0.0; atol=1e-10)
+        # ddG = unique(diff(diff(G)))
+        # length(ddG) == 1 && ddG[1] == 0.
     else
         false
     end

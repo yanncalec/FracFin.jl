@@ -59,9 +59,12 @@ end
 """
     fullpastfilt(X::AbstractVector{<:Number}, filters::AbstractVector)
 
+Filter a signal `X` of length `N` by `N` filters of increasing length from 1 to `N`.
 """
 function fullpastfilt(X::AbstractVector{<:Number}, filters::AbstractVector, n::Integer=2, method::Symbol=:recursive)
     @assert length(X) >= length(filters)
+    @assert all(length(f)==n for (n,f) in enumerate(filters))
+
 #     Φ = V -> vcat(V[1], [sum(V[1:t].*filters[t]) for t=1:length(filters)])
     Φ = V -> [sum(V[1:t].*filters[t]) for t=1:length(filters)]
     Xϕ = Φ(X)
@@ -234,52 +237,6 @@ end
 
 
 """
-Compute filters of Wavelet Packet transform.
-
-# Args
-- lo: low-pass filter
-- hi: high-pass filter
-- n: level of decomposition. If n=0 the original filters are returned.
-
-# Returns
-- a matrix of size ?-by-2^n that each column is a filter.
-"""
-function wpt_filter(lo::AbstractVector{<:Number}, hi::AbstractVector{<:Number}, n::Integer)
-    F0::Vector{Vector{T}}=[[1]]
-    for l=1:n+1
-        F1::Vector{Vector{T}}=[]
-        for f in F0
-            push!(F1, f ⊛ lo)
-            push!(F1, f ⊛ hi)
-        end
-        F0 = F1
-    end
-    return hcat(F0...)
-end
-
-
-"""
-N-fold convolution of two filters.
-
-Compute
-    x_0 ∗ x_1 ∗ ... x_{n-1}
-where x_i ∈ {lo, hi}, i.e. either the low or the high filter.
-
-# Returns
-- a matrix of size ?-by-(level+1) that each column is a filter.
-"""
-function biconv_filter(lo::Vector{T}, hi::Vector{T}, n::Int) where {T<:Number}
-    @assert n>=0
-    F0::Vector{Vector{T}}=[]
-    for l=0:n+1
-        s = reduce(∗, [lo for i=l+1:n+1]; init=reduce(∗, [hi for i=1:l]))
-        push!(F0, s)
-    end
-    return hcat(F0...)
-end
-
-
-"""
 Quadratic mirrored filter.
 
 # Notes
@@ -287,79 +244,6 @@ Quadratic mirrored filter.
 """
 function qmf(h::AbstractVector{<:Number})
     reverse(h .* (-1).^(0:length(h)-1))  # reverse(x) = x[end:-1:1]
-end
-
-
-"""
-Dyadic scale stationary wavelet transform using à trous algorithm.
-
-# Returns
-- ac: matrix of approximation coefficients with increasing scale index in column direction
-- dc: matrix of detail coefficients
-- mc: mask for valid coefficients
-
-# Notes
-Current implementation is buggy: reconstruction by `iswt` can be very wrong.
-"""
-function swt(x::AbstractVector{<:Number}, lo::AbstractVector{<:Number}, hi::AbstractVector{<:Number}, level::Integer, mode::Symbol)
-    @assert level > 0
-    @assert length(lo) == length(hi)
-
-    # # if high pass filter is not given, use the qmf.
-    # if isempty(hi)
-    #     hi = (lo .* (-1).^(1:length(lo)))[end:-1:1]
-    # else
-    #     @assert length(lo) == length(hi)
-    # end
-
-    nx = length(x)
-    # fct = sqrt(2)  # scaling factor
-    fct = 1
-    ac = zeros(T, (nx, level+1))  # approximation coefficients
-    ac[:,1] = x
-    dc = zeros(T, (nx, level))  # detail coefficients
-    mc = zeros(Bool, (nx, level))  # masks
-
-    # Iteration of the cascade algorithm
-    for n = 1:level
-        # up-sampling of qmf filters
-        lo_up = upsampling(lo, 2^(n-1), tight=true)
-        hi_up = upsampling(hi, 2^(n-1), tight=true)
-        km, vm = convmask(nx, length(lo_up), mode)
-
-        mc[:,n] = vm[km]
-        dc[:,n] = fct * conv(hi_up, ac[:,n])[km]
-        ac[:,n+1] = fct * conv(lo_up, ac[:,n])[km]
-    end
-
-    return  ac[:,2:end], dc, mc
-end
-
-
-"""
-Inverse stationary transform.
-"""
-function iswt(ac::AbstractVector{<:Number}, dc::AbstractMatrix{<:Number}, lo::AbstractVector{<:Number}, hi::AbstractVector{<:Number}, mode::Symbol)
-    @assert length(ac) == size(dc,1)
-
-    level = size(dc, 2)  # number of levels of transform
-    nx = length(ac)  # length of resynthesized signal
-    # fct = sqrt(2)  # scaling factor
-    fct = 1
-    mask = zeros(nx)  # mask emulating the up-sampling operator in the decimated transform
-
-    xr = ac  # initalization of resynthesized signal
-    # xr = zeros(T, (nx,level))  # reconstructed approximation coefficients at different levels
-
-    for n=level:-1:1
-        lo_up = upsampling(lo, 2^(n-1), tight=true)
-        hi_up = upsampling(hi, 2^(n-1), tight=true)
-        km, vm = convmask(nx, length(lo_up), mode)
-
-        fill!(mask, 0); mask[1:2^(n):end] = 1
-        xr = fct * (conv(hi_up, mask .* view(dc,:,n)) + conv(lo_up, mask .* xr))[km]
-    end
-    return xr
 end
 
 
@@ -456,9 +340,6 @@ function iswt(ac::AbstractVector{<:Number}, dc::AbstractMatrix{<:Number}, wvl::S
 end
 
 
-# function dyadic_wavelet_filters()
-# end
-
 """
 Continuous wavelet transform based on quadrature.
 
@@ -476,11 +357,11 @@ function cwt_quad(x::AbstractVector{<:Number}, wfunc::Function, sclrng::Abstract
     mc = zeros(Bool, (Nx, Ns))
 
     for (n,k) in enumerate(sclrng)
-        f = wfunc(k)
+        f = wfunc(k) # get the function ψ(./k)
         km, vm = convmask(Nx, length(f), mode)
 
         Y = conv(x, f[end:-1:1])
-        dc[:,n] = Y[km] / √k  # 1/√k factor: see definition of DCWT
+        dc[:,n] = Y[km] / √k
         mc[:,n] = vm[km]
     end
     return dc, mc
@@ -545,19 +426,6 @@ function intscale_wavelet_filter(k::Integer, ψ::Function, Sψ::Tuple{Real,Real}
 end
 
 
-"""
-Integer (even) scale Haar filter.
-
-The original Haar wavelet takes value 1 on [0,1/2) and -1 on [1/2, 1) and 0 elsewhere.
-"""
-function intscale_haar_filter(scl::Integer)
-    @assert scl > 0 && iseven(scl)
-
-    k::Int = div(scl,2)
-    return vcat(ones(Float64, k), -ones(Float64, k))
-end
-
-
 mexhat(t::Real) = -exp(-t^2) * (4t^2-2t) / (2*sqrt(2π))
 
 function intscale_mexhat_filter(k::Integer)
@@ -569,6 +437,28 @@ Continous Mexican hat transform
 """
 function cwt_mexhat(x::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, mode::Symbol=:center)
     return cwt_quad(x, intscale_mexhat_filter, sclrng, mode)
+end
+
+
+"""
+Integer (even) scale Haar filter.
+
+The original Haar wavelet takes value 1 on [0,1/2) and -1 on [1/2, 1) and 0 elsewhere.
+"""
+function intscale_haar_filter(s::Integer)
+    @assert s > 0 && iseven(s)
+
+    return vcat(ones(Float64, s÷2), -ones(Float64, s÷2))
+end
+
+
+"""
+Continous Haar transform.
+"""
+function cwt_haar(x::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, mode::Symbol)
+    all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
+
+    return cwt_quad(x, intscale_haar_filter, sclrng, mode)
 end
 
 
@@ -585,34 +475,18 @@ end
 
 
 """
-    intscale_bspline_filter(scl::Int, v::Int)
+    intscale_bspline_filter(s::Int, v::Int)
 
 Integer (even) scale B-Spline filter, which is defined as the auto-convolution of Haar filter.
-
-# Notes
-- The true scale is `2k`, like in `intscale_haar_filter`.
-- A trick can be used to improve the scaling law at fine scales, but this corrupts the intercept with a unknown factor in the linear regression.
 """
-function intscale_bspline_filter(scl::Integer, v::Integer)
-    @assert scl > 0 && iseven(scl)
-    @assert v>0
+function intscale_bspline_filter(s::Integer, v::Integer)
+    @assert s > 0 && iseven(s)
+    @assert v > 0
 
-    k::Int = div(scl,2)
-    hi = vcat(ones(Float64, k), -ones(Float64, k))
-    b0 = reduce(∗, [hi for n=1:v]) / (2k)^(v-1)
+    hi = vcat(ones(Float64, s÷2), -ones(Float64, s÷2))  # Haar filter at scale s
+    ψv = reduce(∗, [hi for n=1:v]) / (s)^(v-1)
 
-    return b0  # <-- without forced scaling.
-    # return normalize(b0) * sqrt(2k)  # <-- trick: forced scaling.
-end
-
-
-"""
-Continous Haar transform.
-"""
-function cwt_haar(x::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, mode::Symbol)
-    all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
-
-    return cwt_quad(x, intscale_haar_filter, sclrng, mode)
+    return ψv
 end
 
 
@@ -632,8 +506,8 @@ Continous B-Spline transform at integer (even) scales.
 function cwt_bspline(x::AbstractVector{<:Real}, sclrng::AbstractVector{<:Integer}, v::Integer, mode::Symbol)
     all(iseven.(sclrng)) || error("Only even integer scale is admitted.")
 
-    # bsfilter = k->normalize(intscale_bspline_filter(k, v))
-    bsfilter = k->intscale_bspline_filter(k, v)
+    # bsfilter = s->normalize(intscale_bspline_filter(s, v))
+    bsfilter = s->intscale_bspline_filter(s, v)
     return cwt_quad(x, bsfilter, sclrng, mode)
 end
 

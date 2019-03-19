@@ -174,7 +174,7 @@ maximum(abs.(G-W))  # close to 0
 struct FractionalWaveletNoise <: FilteredProcess{DiscreteTime, FractionalBrownianMotion}
     parent_process::FractionalBrownianMotion
     filter::AbstractVector{<:Real}
-    coeff::AbstractVector{<:Real}  # coefficients for the summation of |t - d*l|^(2H)
+    coeff::AbstractVector{<:Real}  # coefficients for the summation of |t - d*l|^(2H), with `-1/2` built in
 
     function FractionalWaveletNoise(hurst::Real, filter::AbstractVector{<:Real})
         @assert isapprox(sum(filter), 0; atol=1e-8) "Filter must not contain DC."
@@ -195,17 +195,18 @@ function fWn_cov_coeff(u::AbstractVector{<:Real}, v::AbstractVector{<:Real})
     m = length(u)
     n = length(v)
 
-    w = zeros(promote_type(eltype(u),eltype(v)), m+n-1)
-    for j=1:m, k=1:n
-        w[j-k+n] += u[j] * v[k]  # corresponding to the range 1-n:m-1
-    end
+    w = native_conv(u, reverse(v))
+    # w = zeros(promote_type(eltype(u),eltype(v)), m+n-1)
+    # for j=1:m, k=1:n
+    #     w[j-k+n] += u[j] * v[k]  # corresponding to the range 1-n:m-1
+    # end
 
     # another implementation is the following:
     # # W = v .* u'
     # # w = [sum(diag(W,d)) for d=1-n:m-1]
     # however this is way much slower.
 
-    return -w/2  # factor -1/2 comes from the covariance of fBm
+    return w  # factor -1/2 comes from the covariance of fBm
 end
 
 fWn_cov_coeff(u::AbstractVector{<:Real}) = fWn_cov_coeff(u, u)
@@ -215,7 +216,7 @@ Autocovariance function of stardard (continuous time) fWn.
 """
 function fWn_autocov(X::FractionalWaveletNoise, t::Real, δ::Real)
     n = length(X.filter)
-    return sum(X.coeff .* abs.(t .- δ*(1-n:n-1)).^(2*ss_exponent(X)))
+    return -1/2 * sum(X.coeff .* abs.(t .- δ*(1-n:n-1)).^(2*ss_exponent(X)))
 end
 
 autocov(X::FractionalWaveletNoise, n::Integer) = fWn_autocov(X, n, 1)
@@ -231,8 +232,8 @@ Compute the covariance matrix between the grid `G1` and `G2` of a standard (cont
 """
 function covmat(X::FractionalWaveletNoise, G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, δ::Real=1)
     Σ = zeros(length(G1),length(G2))
-    for (c,s) in enumerate(G2), (r,t) in enumerate(G1)
-        Σ[r,c] = fWn_autocov(X, t-s, δ)
+    for (c,t) in enumerate(G2), (r,s) in enumerate(G1)
+        Σ[r,c] = fWn_autocov(X, s-t, δ)
     end
 
     return Σ
@@ -246,8 +247,9 @@ function fWn_covmat(G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, filt
     coeff = fWn_cov_coeff(filter)
     n = length(filter)
     Σ = zeros(length(G1),length(G2))
-    for (c,s) in enumerate(G2), (r,t) in enumerate(G1)
-        Σ[r,c] = sum(coeff .* abs.((t-s) .- δ*(1-n:n-1)).^(2H))
+
+    for (c,t) in enumerate(G2), (r,s) in enumerate(G1)
+        Σ[r,c] = -1/2 * sum(coeff .* abs.((s-t) .- δ*(1-n:n-1)).^(2H))
     end
 
     return Σ
@@ -272,7 +274,9 @@ struct FractionalWaveletNoiseBank <: AbstractRandomField # <: FilteredProcess{Di
     function FractionalWaveletNoiseBank(hurst::Real, filters::AbstractVector{<:AbstractVector{<:Real}})
         @assert all(isapprox(sum(f), 0; atol=1e-8) for f in filters) "Filters must not contain DC."
 
-        coeffs = [(fWn_cov_coeff(u,v), (1-length(v):length(u)-1)) for v in filters, u in filters]
+        # Gotcha! Double for-loops in array comprehension has reversed order than the usual double for-loop, e.g.
+        # [(r,c) for r=1:3, c=1:2] is a 3-by-2 matrix
+        coeffs = [(fWn_cov_coeff(u,v), (1-length(v):length(u)-1)) for u in filters, v in filters]  # the first for-loop variable `u` is the row dimension
         new(FractionalBrownianMotion(hurst), filters, coeffs)
     end
 end
@@ -288,7 +292,8 @@ Covariance of fWnb. This covariance is a matrix since fWnb is multivariate proce
 
 # Args
 - X: a fWnb process
-- t:
+- t: time
+- δ: sampling step
 
 # Notes
 - filter at [r,c] is the reverse of that at [c,r]
@@ -296,91 +301,58 @@ Covariance of fWnb. This covariance is a matrix since fWnb is multivariate proce
 By consequent the final matrix Σ(t) = Σ'(-t).
 """
 function autocov(X::FractionalWaveletNoiseBank, t::Real, δ::Real)
+    J = length(X.filters)
     H = ss_exponent(X)
-    Σ = zeros(Real, size(X.coeffs))
-    for c=1:length(X.filters), r=1:length(X.filters)
+    Σ = zeros(Real, (J,J))
+
+    for c=1:J, r=1:J
         # X.coeffs[r,c] is (filter, range of index)
-        Σ[r,c] = sum(X.coeffs[r,c][1] .* abs.(t .- δ*X.coeffs[r,c][2]).^(2H))
+        Σ[r,c] = -1/2 * sum(X.coeffs[r,c][1] .* abs.(t .- δ*X.coeffs[r,c][2]).^(2H))
     end
     return Σ
 end
 
 
 """
-Compute the covariance matrix of standard (continuous time) fractional Wavelet noise of Hurst exponent `H` and time lag `δ` between the grid `G1` and `G2`.
+Compute the covariance matrix of standard (continuous time) fractional Wavelet noise bank of Hurst exponent `H` and time lag `δ` between the grid `G1` and `G2`.
 """
 function covmat(X::FractionalWaveletNoiseBank, G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, δ::Real)
     J = length(X.filters)
-    Σ = zeros(length(G1)*J, length(G2)*J)
-    for (c,s) in enumerate(G2), (r,t) in enumerate(G1)
-        Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = autocov(X, t-s, δ)
+    l1, l2 = length(G1), length(G2)
+    Σ = zeros(l1*J, l2*J)
+
+    for c=0:l2-1,r=0:l1-1  # inner (row) iteration is on `r`
+        Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = autocov(X, G1[r+1]-G2[c+1], δ)
     end
-    return Σ
+    return Σ  # not forcing symmetry
 end
 
 function covmat(X::FractionalWaveletNoiseBank, G::AbstractVector{<:Real}, δ::Real)
     J = length(X.filters)
-    Σ = zeros(length(G)*J, length(G)*J)
-    for (c,s) in enumerate(G), (r,t) in enumerate(G)
-        Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (r>=c) ? autocov(X, t-s, δ) : transpose(Σ[c,r])
+    l = length(G)
+    Σ = zeros(l*J, l*J)
+
+    for c=0:l-1,r=0:l-1
+        # use the property:
+        # autocov(x, t) = transpose(autocov(x, -t))
+        Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (r>=c) ? autocov(X, G[r+1]-G[c+1], δ) : transpose(Σ[(c*J+1):(c*J+J), (r*J+1):(r*J+J)])
     end
 
-    return Matrix(Symmetric(Σ))
+    return Matrix(Symmetric(Σ))  # forcing symmetry
 end
 
 function covmat(X::FractionalWaveletNoiseBank, G::AbstractVector{<:Integer})
-    if isregulargrid(G)
-        J = length(X.filters)
-        l = length(G)
+    J = length(X.filters)
+    l = length(G)
+    Σ = zeros(l*J, l*J)
 
-        Σs = [autocov(X, G[n]-G[1], 1) for n=1:length(G)]
-        Σ = zeros(l*J, l*J)
-        for c=0:l-1,r=0:l-1
-            Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (c>=r) ? Σs[c-r+1] : transpose(Σs[r-c+1])
-        end
+    Σs = [autocov(X, G[n]-G[1], 1) for n=1:length(G)]
 
-        return Matrix(Symmetric(Σ))  #  forcing symmetry
-    else
-        return covmat(X, G, 1)
+    for c=0:l-1,r=0:l-1
+        Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (r>=c) ? Σs[r-c+1] : transpose(Σs[c-r+1])
     end
+
+    return Matrix(Symmetric(Σ))  # forcing symmetry
 end
 
-covmat(X::FractionalWaveletNoiseBank, l::Integer) = covmat(X, 1:l)
-
-
-########################################################
-# """
-# Compute the covariance matrix of a fWn at some time lag.
-
-# # Args
-# - F: array of band pass filters (no DC component)
-# - d: time lag
-# - H: Hurst exponent
-# """
-# function fWn_covmat_lag(F::AbstractVector{<:AbstractVector{T}}, d::DiscreteTime, H::Real) where {T<:Real}
-#     L = maximum([length(f) for f in F])  # maximum length of filters
-#     # M = [abs(d+(n-m))^(2H) for n=0:L-1, m=0:L-1]  # matrix comprehension is ~ 10x slower
-#     M = zeros(L,L)
-#     for n=1:L, m=1:L
-#         M[n,m] = abs(d+(n-m))^(2H)
-#     end
-#     Σ = -1/2 * [f' * view(M, 1:length(f), 1:length(g)) * g for f in F, g in F]
-# end
-
-
-# """
-# Compute the covariance matrix of a time-concatenated fWn.
-# """
-# function fWn_covmat(F::AbstractVector{<:AbstractVector{T}}, lmax::Int, H::Real) where {T<:Real}
-#     J = length(F)
-#     Σ = zeros(((lmax+1)*J, (lmax+1)*J))
-#     Σs = [fWn_covmat_lag(F, d, H) for d = 0:lmax]
-
-#     for r = 0:lmax
-#         for c = 0:lmax
-#             Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (c>=r) ? Σs[c-r+1] : transpose(Σs[r-c+1])
-#         end
-#     end
-
-#     return Matrix(Symmetric(Σ))  #  forcing symmetry
-# end
+# covmat(X::FractionalWaveletNoiseBank, l::Integer) = covmat(X, 1:l)

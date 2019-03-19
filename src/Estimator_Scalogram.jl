@@ -26,7 +26,7 @@ B-Spline scalogram estimator for Hurst exponent and volatility.
 - v: vanishing moments of the wavelet
 - p: power of the scalogram
 """
-function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, vm::Integer; pow::Real=2., method::Symbol=:optim, cmode::Symbol=:causal)
+function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, vm::Integer; pow::Real=2., method::Symbol=:optim, cmode::Symbol=:causal, reweight::Bool=true)
     # remove columns containing NaN
     idx = findall(vec(.!any(isnan.(X), dims=1)))
     X = X[:,idx] # view(X,:,idx)
@@ -45,13 +45,19 @@ function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVect
 
         # compute the weighting vector:
         # Run first an estimation of Hurst by linear regression, then use this estimate to compute the weighting vector.
+        # Note that the reweighting scheme is exact only for pow=2.
         dg = DataFrames.DataFrame(xvar=xp, yvar=yp)
         opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
         coef = GLM.coef(opm)
         η, hurst = coef[1], coef[2] - 1/2  # intercept and slope
         res = GLM.deviance(opm)  # residual
-        ws =  bspline_scalogram_variance(0 < hurst < 1 ? hurst : 0.5, vm, sclrng, size(X,2)) .^ -1
-        # ws ./= sum(ws)
+
+        ws =  if reweight
+            bspline_scalogram_variance(0 < hurst < 1 ? hurst : 0.5, vm, sclrng, size(X,2)) .^ (-1)
+        else
+            ones(length(sclrng))  # uniform weight
+        end
+        ws ./= sum(ws)
 
         # estimation of H and η
         if method == :optim
@@ -90,7 +96,7 @@ function bspline_scalogram_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVect
             # opm = GLM.lm(@GLM.formula(yvar~xvar), dg)
             coef = GLM.coef(opm)
             η, hurst = coef[1], coef[2] - 1/2
-            res = sqrt(GLM.deviance(opm) / length(xp) / var(yp))
+            res = sqrt(GLM.deviance(opm) / var(yp)) # / length(xp)
 
         # elseif method == :irls
         #     coef = IRLS(yp, xp, p; maxiter=10^4, tol=10^-4)
@@ -136,3 +142,4 @@ function bspline_scalogram_estim(X::AbstractVector{<:Real}, sclrng::AbstractVect
     return bspline_scalogram_estim(Wt', sclrng, v; kwargs...)
 end
 
+const scalogram_estim = bspline_scalogram_estim
