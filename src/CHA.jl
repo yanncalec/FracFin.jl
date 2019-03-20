@@ -197,11 +197,14 @@ function convmask(nx::Integer, nh::Integer, mode::Symbol)
     kmask = zeros(Bool, nx+nh-1)
 
     if mode == :left || mode == :causal
+        # kernel's support: 0:nh-1
         kmask[1:nx] .= true
     elseif mode == :right || mode == :anticausal
+        # kernel's support: 1-nh:0
         kmask[nh:end] .= true  # or mask0[end-nx+1:end] = true
     elseif mode == :center || mode == :valid
-        m = max(1, div(nh, 2))
+        # kernel's support: 1-nh÷2 : nh-nh÷2
+        m = max(1, floor(Int, nh/2))  # or nh÷2
         kmask[m:m+nx-1] .= true
     else
         error("Unknown mode: $mode")
@@ -360,6 +363,7 @@ function cwt_quad(x::AbstractVector{<:Number}, wfunc::Function, sclrng::Abstract
         f = wfunc(k) # get the function ψ(./k)
         km, vm = convmask(Nx, length(f), mode)
 
+        # correlation via time-reversed convolution
         Y = conv(x, f[end:-1:1])
         dc[:,n] = Y[km] / √k
         mc[:,n] = vm[km]

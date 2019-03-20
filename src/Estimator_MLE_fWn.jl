@@ -1,6 +1,7 @@
 #### fWn-MLE ####
 
 # This files contains a version of MLE for a single scale fWn.
+# For legacy only, all functions can be realized via fWn bank MLE.
 
 """
     fWn_log_likelihood_H(X, H, ψ, G)

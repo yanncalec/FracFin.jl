@@ -99,12 +99,12 @@ log_likelihood_H(A::AbstractMatrix, X::AbstractVector, args...) = log_likelihood
 
 Log-likelihood of a fWn bank model with the optimal volatility.
 """
-function fWn_log_likelihood_H(X::AbstractVecOrMat{<:Real}, H::Real, F::AbstractVector{<:AbstractVector{<:Real}}, G::AbstractVector{<:Integer}; kwargs...)
+function fWn_log_likelihood_H(X::AbstractVecOrMat{<:Real}, H::Real, F::AbstractVector{<:AbstractVector{<:Real}}, G::AbstractVector{<:Integer}; mode::Symbol=:causal, kwargs...)
     # # Sanity check
     # @assert size(X,1) == length(G) * length(F)  "Mismatched dimensions."
 
     # the process and the number of filters in the filter bank
-    proc = FractionalWaveletNoiseBank(H, F)
+    proc = FractionalWaveletNoiseBank(H, F, mode)  # mode of wavelet transform
     return log_likelihood_H(covmat(proc, G), X; kwargs...)
 end
 
@@ -128,7 +128,7 @@ Maximum likelihood estimation of Hurst exponent and volatility for fWn bank.
 # Notes
 - The fWnb process is multivariate. An observation at time `t` is a vector that the dimension equals to the number of filters used in fWnb. A sample vector is the concatenation of observations made on some time grid `G` and the row dimension of `X` must be `length(F) * length(G)`. Columns of `X` are treated as i.i.d. sample vectors hence the horizontal axis (i.e. last dimension) should NOT be interpreted as time axis (even it is physically the case, e.g. wavelet coefficients of a time series). In fact the time axis is "in" the vertical axis (i.e. the first dimension) that the grid `G` must be conformal with.
 """
-function fWn_MLE_estim(X::AbstractMatrix{<:Real}, F::AbstractVector{<:AbstractVector{<:Real}}, G::AbstractVector{<:Integer}; method::Symbol=:optim, kwargs...)
+function fWn_MLE_estim(X::AbstractMatrix{<:Real}, F::AbstractVector{<:AbstractVector{<:Real}}, G::AbstractVector{<:Integer}; method::Symbol=:optim, mode::Symbol=:causal, kwargs...)
     if length(X) == 0 || any(isnan.(X))  # for empty input or input containing nans
         return (hurst=NaN, σ=NaN, loglikelihood=NaN, optimizer=nothing)
     else
@@ -156,7 +156,7 @@ function fWn_MLE_estim(X::AbstractMatrix{<:Real}, F::AbstractVector{<:AbstractVe
             throw("Unknown method: ", method)
         end
 
-        proc = FractionalWaveletNoiseBank(hurst, F)
+        proc = FractionalWaveletNoiseBank(hurst, F, mode)
 
         Σ = covmat(proc, G)
 
@@ -213,7 +213,6 @@ Maximum likelihood estimation of Hurst exponent and volatility for fractional Wa
 
 # Notes
 - In rolling window estimation, to avoid recomputing the B-Spline filters one can use directly `fWn_MLE_estim`.
-- Currently only the causal wavelet transform is supported. For non-causal wavelet coefficients `X` the result is not garanteed.
 """
 function bspline_MLE_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, vm::Integer, G::AbstractVector{<:Integer}; kwargs...)
     @assert size(X,1) == length(sclrng) * length(G)  "Mismatched dimensions."
