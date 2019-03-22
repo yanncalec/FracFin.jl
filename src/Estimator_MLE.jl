@@ -1,13 +1,28 @@
 ###### MLE ######
 
 """
+Shrinkage of small eigen values.
+"""
+function eigen_truncation(S::AbstractVector{<:Real}, ρ::Real; ptrunc::Real=2., kwargs...)
+    @assert 0<=ρ<=1  "Relative threshold must be in [0,1]"
+    @assert Inf > ptrunc > 0
+
+    Sp = abs.(S).^ptrunc
+    sidx = sortperm(Sp, lt=≥)  # index in decreasing order
+    Sn = (cumsum(view(Sp, sidx))/sum(Sp)).^(1/ptrunc)  # decreasing order
+    k = findfirst(Sn .>= 1-ρ)
+    return isnothing(k) ? (1:length(S)) : sidx[1:k]
+end
+
+
+"""
     xiAx(A, X; ρ=0)
 
 Safe evaluation of the inverse quadratic form
     trace(X' * inv(A) * X)
 where the matrix `A` is symmetric and positive definite. Small eigen values of `A` are truncated.
 """
-function xiAx(A::AbstractMatrix{<:Real}, X::AbstractVecOrMat{<:Real}; ρ::Real=0)
+function xiAx(A::AbstractMatrix{<:Real}, X::AbstractVecOrMat{<:Real}; ρ::Real=0, kwargs...)
     # # Sanity check
     # @assert issymmetric(A)
     # @assert size(X, 1) == size(A, 1)
@@ -21,10 +36,7 @@ function xiAx(A::AbstractMatrix{<:Real}, X::AbstractVecOrMat{<:Real}; ρ::Real=0
     # U, S, V = svd(A)
 
     # shrinkage of small eigen values for stability
-    # idx = findall(abs.(S./maximum(S)) .>= ρ)   # naive way
-    Rs = cumsum(reverse(abs.(S)))/sum(abs.(S))
-    p = findfirst(Rs .>= 1-ρ)
-    idx = isnothing(p) ? (1:length(S)) : max(1,length(S)-p):length(S)
+    idx = eigen_truncation(S, ρ; kwargs...)
 
     return sum((U[:,idx]'*X).^2 ./ S[idx])  # this may raise error if idx is empty
 end
@@ -48,7 +60,7 @@ function log_likelihood(A::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real}; kw
     return -1/2 * (xiAx(A,X, kwargs...) + N*logdet(A) + length(X)*log(2π))
 end
 
-log_likelihood(A::AbstractMatrix, X::AbstractVector) = log_likelihood(A, reshape(X,:,1))
+log_likelihood(A::AbstractMatrix, X::AbstractVector; kwargs...) = log_likelihood(A, reshape(X,:,1), kwargs...)
 
 
 """
@@ -64,7 +76,7 @@ Safe evaluation of the log-likelihood of a fBm model with the implicite σ (opti
 - This function is common to all MLEs with the covariance matrix of form `σ²A(h)`, where `{σ, h}` are unknown parameters. This kind of MLE can be carried out in `h` uniquely and `σ` is obtained from `h`.
 - `log_likelihood_H(Σ, X)` and `log_likelihood(σ^2*Σ, X)` are equivalent with the optimal `σ = sqrt(xiAx(Σ, X) / length(X))`
 """
-function log_likelihood_H(A::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real}; ρ::Real=0)
+function log_likelihood_H(A::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real}; ρ::Real=0, kwargs...)
     # Sanity check
     # @assert issymmetric(A)
     # @assert size(X, 1) == size(A, 1)
@@ -75,21 +87,28 @@ function log_likelihood_H(A::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real}; 
     S, U = eigen(A)  # so that U * Diagonal(S) * inv(U) == A, in particular, U' == inv(U)
 
     # shrinkage of small eigen values for stability
-    # idx = findall(abs.(S)/maximum(abs.(S)) .>= ρ)   # naive way
-    Rs = cumsum(reverse(abs.(S)))/sum(abs.(S))
-    p = findfirst(Rs .>= 1-ρ)
-    # idx = isnothing(p) ? (1:length(S)) : max(length(S)÷2,length(S)-p):length(S)
-    idx = isnothing(p) ? (1:length(S)) : max(1,length(S)-p):length(S)
-
-    # println(p)
-    # println(size(A))
+    idx = eigen_truncation(S, ρ; kwargs...)
 
     val = -1/2 * (length(X)*log(sum((U[:,idx]'*X).^2 ./ S[idx])) + N*sum(log.(S[idx])))  # non-constant part of log-likelihood
 
     return val - length(X) * log(2π*exp(1)/length(X))/2  # with the constant part
 end
 
-log_likelihood_H(A::AbstractMatrix, X::AbstractVector, args...) = log_likelihood_H(A, reshape(X,:,1), args...)
+
+# function log_likelihood_H_partial(A::AbstractMatrix{<:Real}, X::AbstractMatrix{<:Real}; kwargs...)
+#     log_likelihood_H_full(diagm(0=>diag(A)), X; kwargs...)
+# end
+
+
+# function log_likelihood_H(A::AbstractMatrix, X::AbstractMatrix; partial::Bool=false, kwargs...)
+#     return if partial
+#         log_likelihood_H_partial(A, X; kwargs...)
+#     else
+#         log_likelihood_H_full(A, X; kwargs...)
+#     end
+# end
+
+log_likelihood_H(A::AbstractMatrix, X::AbstractVector; kwargs...)  = log_likelihood_H(A, reshape(X,:,1); kwargs...)
 
 
 #### fWn (bank)-MLE ####
@@ -105,7 +124,20 @@ function fWn_log_likelihood_H(X::AbstractVecOrMat{<:Real}, H::Real, F::AbstractV
 
     # the process and the number of filters in the filter bank
     proc = FractionalWaveletNoiseBank(H, F, mode)  # mode of wavelet transform
-    return log_likelihood_H(covmat(proc, G), X; kwargs...)
+
+    return log_likelihood_H(covmat(proc, G; kwargs...), X; kwargs...)
+end
+
+
+"""
+Efficient evaluation of `fWn_log_likelihood_H`. This function reuses the precomputed summation coefficients `A` and their supports `K` that are independent of the Hurst exponent `H` hence avoids the re-evaluation. Note that `A` and `K` depend on the mode of the wavelet transform.
+"""
+function fWn_log_likelihood_H(X::AbstractVecOrMat{<:Real}, H::Real, A::AbstractMatrix{<:AbstractVector{<:Real}}, K::AbstractMatrix{<:AbstractVector{<:Real}}, G::AbstractVector{<:Integer}; kwargs...)
+    # # Sanity check
+    # @assert size(X,1) == length(G) * length(F)  "Mismatched dimensions."
+
+    # the process and the number of filters in the filter bank
+    return log_likelihood_H(fWn_covmat(A, K, H, G; kwargs...), X; kwargs...)
 end
 
 
@@ -136,7 +168,9 @@ function fWn_MLE_estim(X::AbstractMatrix{<:Real}, F::AbstractVector{<:AbstractVe
         @assert size(X,1) == length(F) * length(G)  "Mismatched dimensions."
         @assert length(G) == length(unique(G))  "All elements of the grid must be distinct."
 
-        func = h -> -fWn_log_likelihood_H(X, h, F, G; kwargs...)
+        proc = FractionalWaveletNoiseBank(0.5, F, mode)
+        # func = h -> -fWn_log_likelihood_H(X, h, F, G; kwargs...)
+        func = h -> -fWn_log_likelihood_H(X, h, proc.coeffs, proc.supps, G; kwargs...)
 
         opm = nothing
         hurst = nothing
@@ -156,9 +190,9 @@ function fWn_MLE_estim(X::AbstractMatrix{<:Real}, F::AbstractVector{<:AbstractVe
             throw("Unknown method: ", method)
         end
 
-        proc = FractionalWaveletNoiseBank(hurst, F, mode)
-
-        Σ = covmat(proc, G)
+        # proc = FractionalWaveletNoiseBank(hurst, F, mode)
+        # Σ = covmat(proc, G)
+        Σ = fWn_covmat(proc.coeffs, proc.supps, hurst, G; kwargs...)
 
         # Estimation of volatility
         σ = sqrt(xiAx(Σ, X) / length(X))

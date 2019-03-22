@@ -287,6 +287,26 @@ filter(X::FractionalWaveletNoiseBank) = X.filters
 step(X::FractionalWaveletNoiseBank) = 1
 
 
+function fWn_autocov(A::AbstractMatrix{<:AbstractVector{<:Real}}, K::AbstractMatrix{<:AbstractVector{<:Real}}, H::Real, t::Real, δ::Real; partial::Bool=false, kwargs...)
+    @assert size(A) == size(K) && size(A,1) == size(A,2)  "Mismatched dimensions."
+    @assert 0 < H < 1  "Invalid Hurst exponent."
+
+    J = size(A, 1)
+    Σ = zeros(Real, (J,J))
+
+    if partial
+        for r=1:J
+            Σ[r,r] = 1/2 * sum(A[r,r] .* abs.(t .+ δ*K[r,r]).^(2H))
+        end
+    else
+        for c=1:J, r=1:J
+            Σ[r,c] = 1/2 * sum(A[r,c] .* abs.(t .+ δ*K[r,c]).^(2H))
+        end
+    end
+    return Σ
+end
+
+
 """
 Covariance of fWnb. This covariance is a matrix since fWnb is multivariate process.
 
@@ -300,53 +320,62 @@ Covariance of fWnb. This covariance is a matrix since fWnb is multivariate proce
 - range of index at [r,c] is reverse of that at [c,r] times -1
 By consequent the final matrix Σ(t) = Σ'(-t).
 """
-function autocov(X::FractionalWaveletNoiseBank, t::Real, δ::Real)
-    J = length(X.filters)
-    H = ss_exponent(X)
-    Σ = zeros(Real, (J,J))
-
-    for c=1:J, r=1:J
-        # X.coeffs[r,c] is (filter, range of index)
-        Σ[r,c] = 1/2 * sum(X.coeffs[r,c] .* abs.(t .+ δ*X.supps[r,c]).^(2H))
-    end
-    return Σ
+function autocov(X::FractionalWaveletNoiseBank, t::Real, δ::Real; kwargs...)
+    fWn_autocov(X.coeffs, X.supps, ss_exponent(X), t, δ; kwargs...)
 end
 
+# function autocov(X::FractionalWaveletNoiseBank, t::Real, δ::Real)
+#     J = length(X.filters)
+#     H = ss_exponent(X)
+#     Σ = zeros(Real, (J,J))
 
-"""
-Compute the covariance matrix of standard (continuous time) fractional Wavelet noise bank of Hurst exponent `H` and time lag `δ` between the grid `G1` and `G2`.
-"""
-function covmat(X::FractionalWaveletNoiseBank, G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, δ::Real)
-    J = length(X.filters)
+#     for c=1:J, r=1:J
+#         # X.coeffs[r,c] is (filter, range of index)
+#         Σ[r,c] = 1/2 * sum(X.coeffs[r,c] .* abs.(t .+ δ*X.supps[r,c]).^(2H))
+#     end
+#     return Σ
+# end
+
+
+function fWn_covmat(A::AbstractMatrix{<:AbstractVector{<:Real}}, K::AbstractMatrix{<:AbstractVector{<:Real}}, H::Real, G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}; kwargs...)
+    @assert size(A) == size(K) && size(A,1) == size(A,2)  "Dimension mismatches."
+
+    J = size(A,1)
     l1, l2 = length(G1), length(G2)
     Σ = zeros(l1*J, l2*J)
 
     for c=0:l2-1,r=0:l1-1  # inner (row) iteration is on `r`
-        Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = autocov(X, G1[r+1]-G2[c+1], δ)
+        Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = fWn_autocov(A, K, H, G1[r+1]-G2[c+1], δ; kwargs...)
     end
     return Σ  # not forcing symmetry
 end
 
-function covmat(X::FractionalWaveletNoiseBank, G::AbstractVector{<:Real}, δ::Real)
-    J = length(X.filters)
+
+function fWn_covmat(A::AbstractMatrix{<:AbstractVector{<:Real}}, K::AbstractMatrix{<:AbstractVector{<:Real}}, H::Real, G::AbstractVector{<:Real}; kwargs...)
+    @assert size(A) == size(K) && size(A,1) == size(A,2)  "Dimension mismatches."
+
+    J = size(A,1)
     l = length(G)
     Σ = zeros(l*J, l*J)
 
     for c=0:l-1,r=0:l-1
         # use the property:
         # autocov(x, t) = transpose(autocov(x, -t))
-        Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (r>=c) ? autocov(X, G[r+1]-G[c+1], δ) : transpose(Σ[(c*J+1):(c*J+J), (r*J+1):(r*J+J)])
+        Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (r>=c) ? fWn_autocov(A, K, H, G[r+1]-G[c+1], δ; kwargs...) : transpose(Σ[(c*J+1):(c*J+J), (r*J+1):(r*J+J)])
     end
 
     return Matrix(Symmetric(Σ))  # forcing symmetry
 end
 
-function covmat(X::FractionalWaveletNoiseBank, G::AbstractVector{<:Integer})
-    J = length(X.filters)
+
+function fWn_covmat(A::AbstractMatrix{<:AbstractVector{<:Real}}, K::AbstractMatrix{<:AbstractVector{<:Real}}, H::Real, G::AbstractVector{<:Integer}; kwargs...)
+    @assert size(A) == size(K) && size(A,1) == size(A,2)  "Dimension mismatches."
+
+    J = size(A,1)
     l = length(G)
     Σ = zeros(l*J, l*J)
 
-    Σs = [autocov(X, G[n]-G[1], 1) for n=1:length(G)]
+    Σs = [fWn_autocov(A, K, H, G[n]-G[1], 1; kwargs...) for n=1:length(G)]
 
     for c=0:l-1,r=0:l-1
         Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (r>=c) ? Σs[r-c+1] : transpose(Σs[c-r+1])
@@ -354,5 +383,67 @@ function covmat(X::FractionalWaveletNoiseBank, G::AbstractVector{<:Integer})
 
     return Matrix(Symmetric(Σ))  # forcing symmetry
 end
+
+
+"""
+Compute the covariance matrix of standard (continuous time) fractional Wavelet noise bank of Hurst exponent `H` and time lag `δ` between the grid `G1` and `G2`.
+"""
+function covmat(X::FractionalWaveletNoiseBank, G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, δ::Real; kwargs...)
+    return fWn_covmat(X.coeffs, X.supps, ss_exponent(X), G1, G2, δ; kwargs...)
+end
+
+function covmat(X::FractionalWaveletNoiseBank, G::AbstractVector{<:Real}, δ::Real; kwargs...)
+    return fWn_covmat(X.coeffs, X.supps, ss_exponent(X), G, δ; kwargs...)
+end
+
+function covmat(X::FractionalWaveletNoiseBank, G::AbstractVector{<:Integer}; kwargs...)
+    return fWn_covmat(X.coeffs, X.supps, ss_exponent(X), G; kwargs...)
+end
+
+
+# """
+# Compute the covariance matrix of standard (continuous time) fractional Wavelet noise bank of Hurst exponent `H` and time lag `δ` between the grid `G1` and `G2`.
+# """
+# function covmat(X::FractionalWaveletNoiseBank, G1::AbstractVector{<:Real}, G2::AbstractVector{<:Real}, δ::Real)
+#         J = length(X.filters)
+#     l1, l2 = length(G1), length(G2)
+#     Σ = zeros(l1*J, l2*J)
+
+#     for c=0:l2-1,r=0:l1-1  # inner (row) iteration is on `r`
+#         Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = autocov(X, G1[r+1]-G2[c+1], δ)
+#     end
+#     return Σ  # not forcing symmetry
+# end
+
+
+# function covmat(X::FractionalWaveletNoiseBank, G::AbstractVector{<:Real}, δ::Real)
+#     J = length(X.filters)
+#     l = length(G)
+#     Σ = zeros(l*J, l*J)
+
+#     for c=0:l-1,r=0:l-1
+#         # use the property:
+#         # autocov(x, t) = transpose(autocov(x, -t))
+#         Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (r>=c) ? autocov(X, G[r+1]-G[c+1], δ) : transpose(Σ[(c*J+1):(c*J+J), (r*J+1):(r*J+J)])
+#     end
+
+#     return Matrix(Symmetric(Σ))  # forcing symmetry
+# end
+
+
+# function covmat(X::FractionalWaveletNoiseBank, G::AbstractVector{<:Integer})
+#     J = length(X.filters)
+#     l = length(G)
+#     Σ = zeros(l*J, l*J)
+
+#     Σs = [autocov(X, G[n]-G[1], 1) for n=1:length(G)]
+
+#     for c=0:l-1,r=0:l-1
+#         Σ[(r*J+1):(r*J+J), (c*J+1):(c*J+J)] = (r>=c) ? Σs[r-c+1] : transpose(Σs[c-r+1])
+#     end
+
+#     return Matrix(Symmetric(Σ))  # forcing symmetry
+# end
+
 
 # covmat(X::FractionalWaveletNoiseBank, l::Integer) = covmat(X, 1:l)
