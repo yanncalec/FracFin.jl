@@ -168,7 +168,7 @@ function fWn_MLE_estim(X::AbstractMatrix{<:Real}, F::AbstractVector{<:AbstractVe
         @assert size(X,1) == length(F) * length(G)  "Mismatched dimensions."
         @assert length(G) == length(unique(G))  "All elements of the grid must be distinct."
 
-        X = X .- mean(X, dims=2)  # force the zero-mean condition
+        # X = X .- mean(X, dims=2)  # force the zero-mean condition. Attention: this can cause the estimation of H to fail!
 
         proc = FractionalWaveletNoiseBank(0.5, F, mode)
         # func = h -> -fWn_log_likelihood_H(X, h, F, G; kwargs...)
