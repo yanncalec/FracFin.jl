@@ -168,6 +168,8 @@ function fWn_MLE_estim(X::AbstractMatrix{<:Real}, F::AbstractVector{<:AbstractVe
         @assert size(X,1) == length(F) * length(G)  "Mismatched dimensions."
         @assert length(G) == length(unique(G))  "All elements of the grid must be distinct."
 
+        X = X .- mean(X, dims=2)  # force the zero-mean condition
+
         proc = FractionalWaveletNoiseBank(0.5, F, mode)
         # func = h -> -fWn_log_likelihood_H(X, h, F, G; kwargs...)
         func = h -> -fWn_log_likelihood_H(X, h, proc.coeffs, proc.supps, G; kwargs...)
@@ -249,7 +251,7 @@ Maximum likelihood estimation of Hurst exponent and volatility for fractional Wa
 - In rolling window estimation, to avoid recomputing the B-Spline filters one can use directly `fWn_MLE_estim`.
 """
 function bspline_MLE_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, vm::Integer, G::AbstractVector{<:Integer}; kwargs...)
-    @assert size(X,1) == length(sclrng) * length(G)  "Mismatched dimensions."
+    # @assert size(X,1) == length(sclrng) * length(G)  "Mismatched dimensions."
 
     F = [bspline_fWn_filter(s, vm) for s in sclrng]
     fWn_MLE_estim(X, F, G; kwargs...)
@@ -271,6 +273,9 @@ end
     bspline_MLE_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, vm::Integer; kwargs...)
 
 Cross-scale only B-Spline MLE, by treating the columns of `X` as independent observations and using only the cross-scale correleation.
+
+# Notes
+- Setting the keyword argument `partial=true` to use the local Whittle wavelet estimator.
 """
 function bspline_MLE_estim(X::AbstractMatrix{<:Real}, sclrng::AbstractVector{<:Integer}, vm::Integer; kwargs...)
     bspline_MLE_estim(X, sclrng, vm, 1:1; kwargs...)
@@ -310,7 +315,7 @@ Maximum likelihood estimation of Hurst exponent and volatility for fractional Ga
 - G: integer time grid of `X`.
 """
 function fGn_MLE_estim(X::AbstractMatrix{<:Real}, lags::AbstractVector{<:Integer}, G::AbstractVector{<:Integer}; kwargs...)
-    @assert size(X,1) == length(lags) * length(G)  "Mismatched dimensions."
+    # @assert size(X,1) == length(lags) * length(G)  "Mismatched dimensions."
 
     F = [fGn_filter(l) for l in lags]
     fWn_MLE_estim(X, F, G; kwargs...)

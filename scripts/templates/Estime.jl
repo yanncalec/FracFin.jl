@@ -31,6 +31,7 @@ include("Parms_IO.jl")
 project = "Analysis of Lazard NY dataset 2"  # name of the current project
 
 outdir_root = homedir() * "/Outputs/$(project)/"  # root output directory
+# outdir_root = pwd() * "/Outputs/"  # root output directory
 
 Market = "Equity_1"  # market name
 # input csv file
@@ -47,30 +48,30 @@ Npd = isnothing(DataSplt) ? nothing : length(DataSplt[1])  # number of points pe
 outdir_component = outdir_root * "/$(Market)/$(Component)/"  # outdir of the working time-series
 
 
-# #### Visualization of data ####
-# println("Plotting data...")
+#### Visualization of data ####
+println("Plotting data...")
 
-# outdir_fig = outdir_component * "/data/"
-# try mkpath(outdir_fig) catch end
+outdir_fig = outdir_component * "/data/"
+try mkpath(outdir_fig) catch end
 
-# # fig1 = plot(TimeSeries.values(Data), label="Raw price", title=cname, size=(1000,250))
-# # savefig(outdir_fig * "/$(cname).pdf")
+# fig1 = plot(TimeSeries.values(Data), label="Raw price", title=cname, size=(1000,250))
+# savefig(outdir_fig * "/$(cname).pdf")
 
-# fig = plot(DataRaw, label="Raw price", title=Component, size=(1000,250))
-# fname = outdir_fig * "/$(Component).pdf"
-# savefig(fig, fname)
+fig = plot(DataRaw, label="Raw price", title=Component, size=(1000,250))
+fname = outdir_fig * "/$(Component).pdf"
+savefig(fig, fname)
 
-# if parms_io.intraday
-#     outdir_fig = outdir_component * "/data/intraday/"
-#     try mkpath(outdir_fig) catch end
+if parms_io.intraday
+    outdir_fig = outdir_component * "/data/intraday/"
+    try mkpath(outdir_fig) catch end
 
-#     for data in DataSplt
-#         date = Dates.Date(TimeSeries.timestamp(data)[1])
+    for data in DataSplt
+        date = Dates.Date(TimeSeries.timestamp(data)[1])
 
-#         fig = plot(data, label="Raw price", size=(1000,250))
-#         savefig(outdir_fig * "/$(date).pdf")
-#     end
-# end
+        fig = plot(data, label="Raw price", size=(1000,250))
+        savefig(outdir_fig * "/$(date).pdf")
+    end
+end
 
 
 ########## Estimation ##########

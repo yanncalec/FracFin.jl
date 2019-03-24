@@ -3,26 +3,28 @@
 ###### bspline-MLE ######
 
 #### cross-time only ####
-maxscl = Npd÷1
 
-wfct = 20  # empirically: 20 for vm=1, 30 for vm=2
+cscl = Int(Npd*sfct)  # central scale
+wfct = 40  # factor of moving window
 
 parms = (
     estimator = "bspline_MLE_time",
     method = :optim,  # method of optimizer
 
     # Parameters for B-Spline wavelet transform
-    sclrng = 2*[maxscl],  # index of working scale
+    scalefactor = sfct,
+    sclrng = 2*[cscl],  # index of working scale
     vm = 1,  # vanishing moment of the wavelet
     fmode = :causal,  # mode of filtration
     ρ = 0,  # threshold for truncation of small eigen values in the covariance matrix
 
-    dfct = maxscl,  # down-sampling factor
-    ssize = 5,  # size of sub window, set ssize=wsize/dfct to disable sub window
+    dfct = cscl,  # down-sampling factor
+    ssize = 10,  # size of sub window, set ssize=wsize/dfct to disable sub window
     dlen = 1,  # length of decorrelation of sub window
 
-    wsize = maxscl*wfct,  # size of moving window
-    pov = maxscl,  # step of moving window
+    windowfactor = wfct,
+    wsize = cscl*wfct,  # size of moving window
+    pov = Npd÷1,  # step of moving window
     boundary = :hard,  # boundary condition
 )
 
