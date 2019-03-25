@@ -3,7 +3,6 @@
 ######## moving window estimators ########
 
 ###### bspline-scalogram ######
-sfct = 1/2 # factor of scale
 cscl = Int(Npd*sfct)  # central scale
 wscl = 10  # half scale window width, e.g. <=10
 minscl, maxscl = max(1, cscl-wscl), cscl+wscl
